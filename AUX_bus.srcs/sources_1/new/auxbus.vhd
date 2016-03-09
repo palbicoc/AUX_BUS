@@ -13,6 +13,7 @@
 ----------------------------------------------------------------------------------
 -- Revision History:
 -- Revision 1.0 - 03/2016 - Albicocco P. - First Version
+-- Revision 2.0 - 03/2016 - Albicocco P. - Integrated Test Strategy 
 ----------------------------------------------------------------------------------
 -- Additional Comments:
 -- 
@@ -29,6 +30,7 @@ package xpack is
 --------------------
 type ro_reg_type is
 record
+  -------- TRIGGER -------
   -- A FIFO Trigger Number (Test Mode)
   atest_Ntrig      : std_logic_vector (11 downto 0);
   -- B FIFO Trigger Number (Test Mode)
@@ -43,6 +45,36 @@ record
   Ntrig_devA       : std_logic_vector (11 downto 0);
   -- FPGA B Trigger Number
   Ntrig_devB       : std_logic_vector (11 downto 0);
+  -------- XFIFO -------
+  -- A FIFO Full
+  AFIFO_isfull     : std_logic;
+  -- A FIFO Almost Full
+  AFIFO_isafull    : std_logic;
+  -- A FIFO Prog Full
+  AFIFO_ispfull    : std_logic;
+  -- A FIFO Empty
+  AFIFO_isempty    : std_logic;
+  -- B FIFO Full
+  BFIFO_isfull     : std_logic;
+  -- B FIFO Almost Full
+  BFIFO_isafull    : std_logic;
+  -- B FIFO Prog Full
+  BFIFO_ispfull    : std_logic;
+  -- B FIFO Empty
+  BFIFO_isempty    : std_logic;
+  -------- AXI FIFO Regs and Signals -------
+  -- A read data (Reg?)
+  A_read_data      : std_logic_vector (21 DOWNTO 0);
+  -- A FIFO empty (not valid) (Sig)
+  A_empty          : std_logic;
+  -- A Almost Full (Sig)
+  A_afull          : std_logic;
+  -- B read data (Reg?)
+  B_read_data      : std_logic_vector (21 DOWNTO 0);
+  -- B FIFO empty (not valid) (Sig)
+  B_empty          : std_logic;
+  -- B Almost Full (Sig)
+  B_afull          : std_logic;
 end record;
 --------------------
 -- rw_reg
@@ -59,10 +91,35 @@ record
   -------- TEST -------
   -- Enable Test Mode: 0 Disable, 1 Enable.
   test_mode        : std_logic;
-  -- Trigger Test Mode : '0' : count real trigger, '1' : use value in rw_reg.test_Ntrig
+  -- Trigger Test Mode : '0' : count real trigger, '1' : Count trigger only in Local FPGA --use value in rw_reg.test_Ntrig
   test_trig_mode   : std_logic;
-  -- Test Trigger Number
+  -- Test Trigger Number -- Unused
   test_Ntrig       : std_logic_vector (11 DOWNTO 0);
+  -- A Busy flag in test mode
+  A_is_busy        : std_logic;
+  -- B Busy flag in test mode
+  B_is_busy        : std_logic;
+  -------- AXI FIFO Regs and Signals -------
+  -- Enable Read from A FIFO (Reg)
+  A_FIFO_read_en   : std_logic;
+  -- A Read Enable (Sig)
+  A_read_en        : std_logic;
+  -- Enable Write to A FIFO (Sig)
+  A_FIFO_write_en  : std_logic;
+  -- A write data (Reg?)
+  A_write_data     : std_logic_vector (31 DOWNTO 0);
+  -- A Write Enable (Sig)
+  A_write_en       : std_logic;
+  -- Enable Read from B FIFO (Reg)
+  B_FIFO_read_en   : std_logic;
+  -- B read enable (Sig)
+  B_read_en        : std_logic;
+  -- Enable Write to B FIFO (Sig)
+  B_FIFO_write_en  : std_logic;
+  -- B write data (Reg?)
+  B_write_data     : std_logic_vector (31 DOWNTO 0);
+  -- B Write Enable (Sig)
+  B_write_en      : std_logic;
 end record;
 ------------------------------------------------------------------
 ---- CONSTANTS ----
@@ -74,12 +131,25 @@ constant rw_defaults : rw_reg_type := (
   '0',               -- Trigger Counters Reset (A+B+Local)
   -------- TEST -------
   '0',               -- test_mode - Enable Test Mode: 0 Disable, 1 Enable.
-  '0',               -- Trigger Test Mode : '0' : count real trigger, '1' : use value in rw_reg.test_Ntrig.
-  x"555"             -- Test Trigger Number
+  '1',               -- Trigger Test Mode : '0' : count real trigger, '1' : Count trigger only in Local FPGA.
+  x"555",            -- Test Trigger Number
+  '0',               -- A Busy flag in test mode
+  '0',               -- B Busy flag in test mode
+  -------- AXI FIFO -------
+  '0',               -- Enable Read from A FIFO
+  '0',               -- A Read Enable
+  '0',               -- Enable Write to A FIFO
+  (others => '0'),   -- A write data
+  '0',               -- A Write Enable
+  '0',               -- Enable Read from B FIFO
+  '0',               -- B read enable
+  '0',               -- Enable Write to B FIFO
+  (others => '0'),   -- B write data
+  '0'                -- B Write Enable
 );
 ------------------------------------------------------------------
 ---- FUNCTIONS ----
------------------------------------------------------------------
+------------------------------------------------------------------
 --------------------
 -- or_reduce
 --------------------
@@ -93,12 +163,12 @@ function and_reduce(x : std_logic_vector) return std_logic;
 --------------------
 function log2( i : integer) return integer;
 
-end edit_register;
+end xpack;
 
-package body edit_register is
+package body xpack is
 ------------------------------------------------------------------
 ---- FUNCTIONS ----
------------------------------------------------------------------
+------------------------------------------------------------------
 --------------------
 -- or_reduce
 --------------------
@@ -135,7 +205,7 @@ begin
   return r;
 end function;
 
-end edit_register;
+end xpack;
 ----------------------------------------------------------------------------------
 -- Company: LNF - INFN
 -- Authors: Albicocco Pietro
@@ -191,12 +261,14 @@ Port (
   A_Wr_en       : in  STD_LOGIC;
   A_Full        : out STD_LOGIC;
   A_Almost_full : out STD_LOGIC;
+  A_Prog_full   : out STD_LOGIC;
   -------- B FIFO Interface -------
   B_Wr_clk      : in  STD_LOGIC;
   B_Din         : in  STD_LOGIC_VECTOR(22-1 DOWNTO 0);
   B_Wr_en       : in  STD_LOGIC;
   B_Full        : out STD_LOGIC;
   B_Almost_full : out STD_LOGIC;
+  B_Prog_full   : out STD_LOGIC;
   -------- AXI-4  LITE -------
   S_AXI_ACLK    : in  std_logic;
   S_AXI_ARESETN : in  std_logic;
@@ -276,9 +348,9 @@ Port (
   clk           : in  STD_LOGIC;
   rst           : in  STD_LOGIC;
   -------- Status Registers -------
-  ro_reg        : inout ro_reg_type;
+  ro_reg        : out ro_reg_type;
   --------  Ctrl Registers  -------
-  rw_reg        : out rw_reg_type;
+  rw_reg        : in  rw_reg_type;
   -------- Trigger  Signals -------
   -- Local Input Trigger
   trig_in       : in  STD_LOGIC;
@@ -302,9 +374,9 @@ Port (
   clk           : in  STD_LOGIC;
   rst           : in  STD_LOGIC;
   -------- Status Registers -------
-  ro_reg        : inout ro_reg_type;
+  ro_reg        : out ro_reg_type;
   --------  Ctrl Registers  -------
-  rw_reg        : out rw_reg_type;
+  rw_reg        : in  rw_reg_type;
   -------- Test Control Bit -------
   test_mode     : out  STD_LOGIC;
   -------- A FIFO Interface -------
@@ -313,6 +385,7 @@ Port (
   A_Wr_en       : out STD_LOGIC;
   A_Full        : in  STD_LOGIC;
   A_Almost_full : in  STD_LOGIC;
+  A_Prog_full   : in  STD_LOGIC;
   A_busy        : out STD_LOGIC;
   -------- B FIFO Interface -------
   B_Wr_clk      : in  STD_LOGIC;
@@ -320,6 +393,7 @@ Port (
   B_Wr_en       : out STD_LOGIC;
   B_Full        : in  STD_LOGIC;
   B_Almost_full : in  STD_LOGIC;
+  B_Prog_full   : in  STD_LOGIC;
   B_busy        : out STD_LOGIC
 );
 end component xtest;
@@ -338,6 +412,7 @@ Port (
   A_Wr_en       : in STD_LOGIC;
   A_Full        : out STD_LOGIC;
   A_Almost_full : out STD_LOGIC;
+  A_Prog_full   : out STD_LOGIC;
   A_Rd_en       : in STD_LOGIC;
   A_Dout        : out STD_LOGIC_VECTOR(22-1 DOWNTO 0);
   A_Empty       : out STD_LOGIC;
@@ -348,6 +423,7 @@ Port (
   B_Wr_en       : in STD_LOGIC;
   B_Full        : out STD_LOGIC;
   B_Almost_full : out STD_LOGIC;
+  B_Prog_full   : out STD_LOGIC;
   B_Rd_en       : in STD_LOGIC;
   B_Dout        : out STD_LOGIC_VECTOR(22-1 DOWNTO 0);
   B_Empty       : out STD_LOGIC;
@@ -549,6 +625,8 @@ end component xaxi;
 ------------------------------------------------------------------
 -------- Status Registers -------
 signal ro_reg      :  ro_reg_type;
+signal ro_reg_xtest:  ro_reg_type;
+signal ro_reg_xtrig:  ro_reg_type;
 --------  Ctrl Registers  -------
 signal rw_reg      :  rw_reg_type;
 --------------------
@@ -556,12 +634,14 @@ signal rw_reg      :  rw_reg_type;
 --------------------
 -- Trigger Counters and Voter.
 --------------------
-signal xtest_reset : STD_LOGIC;
+signal xtrig_reset : STD_LOGIC;
 signal trigger     : STD_LOGIC_VECTOR(11 DOWNTO 0);
 signal trigger_v   : STD_LOGIC;
 --------------------
 -- xTEST
 --------------------
+-- xtest Reset
+signal xtest_reset : STD_LOGIC;
 -- Test Control Bit
 signal test_mode   : STD_LOGIC;
 -- A FIFO Side
@@ -587,6 +667,7 @@ signal a_dv        : STD_LOGIC;
 signal a_rd_en     : STD_LOGIC;
 signal afull       : STD_LOGIC;
 signal aafull      : STD_LOGIC;
+signal apfull      : STD_LOGIC;
 -- B FIFO Side
 signal B_Din_i     : STD_LOGIC_VECTOR(21 downto 0);  
 signal B_Wr_en_i   : STD_LOGIC;  
@@ -595,6 +676,7 @@ signal b_dv        : STD_LOGIC;
 signal b_rd_en     : STD_LOGIC;
 signal bfull       : STD_LOGIC;
 signal bafull      : STD_LOGIC;
+signal bpfull      : STD_LOGIC;
 -- FIFOs Common 
 signal full_i      : STD_LOGIC;
 --------------------
@@ -602,6 +684,11 @@ signal full_i      : STD_LOGIC;
 --------------------
 -- xCTRL reset
 signal xctrl_reset : std_logic;
+-------- FIFO Interface -------
+signal a_dv_xctrl  : std_logic;
+signal b_dv_xctrl  : std_logic;
+signal a_rd_en_xctrl : std_logic;
+signal b_rd_en_xctrl : std_logic;
 -------- Control Interface -------
 -- Data, Data Valid, Last Event Data and New Event or Data Request
 signal d           : STD_LOGIC_VECTOR(19 downto 0);
@@ -636,7 +723,7 @@ Port Map(
   clk           => clk,
   rst           => xtrig_reset,
   -------- Status Registers -------
-  ro_reg        => ro_reg,
+  ro_reg        => ro_reg_xtrig,
   --------  Ctrl Registers  -------
   rw_reg        => rw_reg,
   -------- Trigger  Signals -------
@@ -651,6 +738,16 @@ Port Map(
   -- Output Trigger Valid
   trigger_v     => trigger_v
 );
+-- Voted Trigger Number Valid
+ro_reg.Ntrig_voter_v <= ro_reg_xtrig.Ntrig_voter_v;
+-- Voted Trigger Number
+ro_reg.Ntrig_voter   <= ro_reg_xtrig.Ntrig_voter;
+-- Local Trigger Number
+ro_reg.Ntrig_local   <= ro_reg_xtrig.Ntrig_local;
+-- FPGA A Trigger Number
+ro_reg.Ntrig_devA    <= ro_reg_xtrig.Ntrig_devA;
+-- FPGA B Trigger Number
+ro_reg.Ntrig_devB    <= ro_reg_xtrig.Ntrig_devB;
 --------------------
 -- xTEST
 --------------------
@@ -662,7 +759,7 @@ Port Map (
   clk           => clk,
   rst           => xtest_reset,
   -------- Status Registers -------
-  ro_reg        => ro_reg,
+  ro_reg        => ro_reg_xtest,
   --------  Ctrl Registers  -------
   rw_reg        => rw_reg,
   -------- Test Control Bit -------
@@ -673,30 +770,28 @@ Port Map (
   A_Wr_en       => A_Wr_en_t,
   A_Full        => afull,
   A_Almost_full => aafull,
+  A_Prog_full   => apfull,
   A_busy        => A_busy_t,
   -------- B FIFO Interface -------
   B_Wr_clk      => B_Wr_clk,
   B_Din         => B_Din_t,
   B_Wr_en       => B_Wr_en_t,
-  B_Full        => bfull,
   B_Almost_full => bafull,
+  B_Full        => bfull,
+  B_Prog_full   => bpfull,
   B_busy        => B_busy_t
 );
--------- Test/Normal Mode -------
-A_Din_i       <= A_Din_t   when test_mode = '1' else A_Din;
-A_Wr_en_i     <= A_Wr_en_t when test_mode = '1' else A_Wr_en;
-B_Din_i       <= B_Din_t   when test_mode = '1' else A_Din;
-B_Wr_en_i     <= B_Wr_en_t when test_mode = '1' else A_Wr_en;
-full_i        <= busy_t    when test_mode = '1' else full;
-busy_t        <= A_busy_t  or B_busy_t;
+-------- XTEST Status Register -------
+ro_reg.atest_Ntrig    <= ro_reg_xtest.atest_Ntrig;
+ro_reg.btest_Ntrig    <= ro_reg_xtest.btest_Ntrig;
 --------------------
 -- xFIFO
 --------------------
-xfifo_reset   <= rst or rw_reg.fifo_reset or rw_reg.reset;
+xfifo_reset   <= rst or rw_reg.fiforeset or rw_reg.reset;
 A_Full        <= afull;
 B_Full        <= bfull;
-A_Almost_full <= aafull;
-B_Almost_full <= bafull;
+A_Prog_full   <= apfull;
+B_Prog_full   <= bpfull;
 xfifo_inst: xfifo
 Port Map(
   Rst           => xfifo_reset,
@@ -707,6 +802,7 @@ Port Map(
   A_Wr_en       => A_Wr_en_i,
   A_Full        => afull,
   A_Almost_full => aafull,
+  A_Prog_full   => apfull,
   A_Rd_en       => a_rd_en,
   A_Dout        => a_d,
   A_Empty       => open,
@@ -717,11 +813,84 @@ Port Map(
   B_Wr_en       => B_Wr_en_i,
   B_Full        => bfull,
   B_Almost_full => bafull,
+  B_Prog_full   => bpfull,
   B_Rd_en       => b_rd_en,
   B_Dout        => b_d,
   B_Empty       => open,
   B_Valid       => b_dv
 );
+-------- XFIFO Status Register -------
+  -- A FIFO Full
+  ro_reg.AFIFO_isfull  <= afull;
+  -- A FIFO Almost Full
+  ro_reg.AFIFO_isafull <= aafull;
+  -- A FIFO Prog Full
+  ro_reg.AFIFO_ispfull <= apfull;
+  -- A FIFO Empty
+  ro_reg.AFIFO_isempty <= not a_dv;
+  -- B FIFO Full
+  ro_reg.BFIFO_isfull  <= bfull;
+  -- B FIFO Almost Full
+  ro_reg.BFIFO_isafull <= bafull;
+  -- B FIFO Prog Full
+  ro_reg.BFIFO_ispfull <= bpfull;
+  -- B FIFO Empty
+  ro_reg.BFIFO_isempty <= not b_dv;
+-------- FIFO AXI/Test/Normal Mode -------
+-- Data Read to XAXI
+ro_reg.A_read_data <= a_d  when rw_reg.A_FIFO_read_en = '1' else
+                      (others => '0');
+ro_reg.B_read_data <= b_d  when rw_reg.B_FIFO_read_en = '1' else
+                      (others => '0');
+-- Empty to XAXI
+ro_reg.A_empty<= not a_dv  when rw_reg.A_FIFO_read_en = '1' else
+                 '0';
+ro_reg.B_empty<= not b_dv  when rw_reg.B_FIFO_read_en = '1' else
+                 '0';
+-- Full to XAXI
+ro_reg.A_afull<= aafull    when rw_reg.A_FIFO_write_en = '1' else
+                 '0';
+ro_reg.B_afull<= bafull    when rw_reg.B_FIFO_write_en = '1' else
+                 '0';
+-- Data Read to XCTRL
+  -- Directly connected
+-- Data Valid to XCTRL
+a_dv_xctrl    <= '0'       when rw_reg.A_FIFO_read_en = '1' or rw_reg.B_FIFO_read_en = '1'   else
+                 a_dv;
+b_dv_xctrl    <= '0'       when rw_reg.A_FIFO_read_en = '1' or rw_reg.B_FIFO_read_en = '1'   else
+                 b_dv;
+-- Full to XFRONT
+full_i        <= '1'       when rw_reg.A_FIFO_write_en = '1' or rw_reg.B_FIFO_write_en = '1' else
+                 busy_t    when test_mode = '1'                                              else
+                 full;
+busy_t        <= A_busy_t  or B_busy_t;
+-- Data Read Enable to XFIFO
+a_rd_en       <= rw_reg.A_read_en    when rw_reg.A_FIFO_read_en = '1'  else
+                 '0'                 when rw_reg.B_FIFO_read_en = '1'  else
+                 a_rd_en_xctrl;
+b_rd_en       <= rw_reg.B_read_en    when rw_reg.B_FIFO_read_en = '1'  else
+                 '0'                 when rw_reg.A_FIFO_read_en = '1'  else
+                 b_rd_en_xctrl;
+-- Data Write to XFIFO
+A_Din_i       <= rw_reg.A_write_data (21 DOWNTO 0) 
+                                     when rw_reg.A_FIFO_write_en = '1' else
+                 (others => '0')     when rw_reg.B_FIFO_write_en = '1' else
+                 A_Din_t             when test_mode = '1'              else
+                 A_Din;
+B_Din_i       <= rw_reg.B_write_data (21 DOWNTO 0) 
+                                     when rw_reg.B_FIFO_write_en = '1' else
+                 (others => '0')     when rw_reg.A_FIFO_write_en = '1' else
+                 B_Din_t             when test_mode = '1'              else
+                 B_Din;
+-- Write Enable to XFIFO
+A_Wr_en_i     <= rw_reg.A_write_en   when rw_reg.A_FIFO_write_en = '1' else
+                 '0'                 when rw_reg.B_FIFO_write_en = '1' else
+                 A_Wr_en_t           when test_mode = '1'              else
+                 A_Wr_en;
+B_Wr_en_i     <= rw_reg.B_write_en   when rw_reg.B_FIFO_write_en = '1' else
+                 '0'                 when rw_reg.A_FIFO_write_en = '1' else
+                 B_Wr_en_t           when test_mode = '1'              else
+                 B_Wr_en;
 --------------------
 -- xCTRL
 --------------------
@@ -732,12 +901,12 @@ Port Map(
   rst           => xctrl_reset,
   -- A FIFO Side
   a_d           => a_d,
-  a_dv          => a_dv,
-  a_rd_en       => a_rd_en,
+  a_dv          => a_dv_xctrl,
+  a_rd_en       => a_rd_en_xctrl,
   -- B FIFO Side
   b_d           => b_d,
-  b_dv          => b_dv,
-  b_rd_en       => b_rd_en,
+  b_dv          => b_dv_xctrl,
+  b_rd_en       => b_rd_en_xctrl,
   -- AUXBUS Side
   -- Data, Data Valid, Last Event Data and New Event or Data Request
   x_d           => d,
@@ -756,7 +925,7 @@ Port Map(
 -- xFRONT
 --------------------
 xfront_reset <= rst or rw_reg.reset;
-full         <= aafull or bafull;
+full         <= apfull or bpfull;
 xfront_inst: xfront
 Generic Map(
   clock_period  => clock_period
@@ -881,7 +1050,7 @@ end rtl;
 --
 ----------------------------------------------------------------------------------
 -- Revision History:
--- Revision 1.0 - 03/2016 - Albicocco P. - First Version
+-- Revision 2.0 - 03/2016 - Albicocco P. - Integrated Test Strategy
 ----------------------------------------------------------------------------------
 -- Additional Comments:
 -- 
@@ -889,6 +1058,7 @@ end rtl;
 LIBRARY ieee;
 USE ieee.std_logic_1164.ALL;
 USE ieee.numeric_std.ALL;
+USE ieee.std_logic_unsigned.ALL;
 
 library work;
 use work.xpack.all;
@@ -899,9 +1069,9 @@ Port (
   clk           : in  STD_LOGIC;
   rst           : in  STD_LOGIC;
   -------- Status Registers -------
-  ro_reg        : inout ro_reg_type;
+  ro_reg        : out ro_reg_type;
   --------  Ctrl Registers  -------
-  rw_reg        : out rw_reg_type;
+  rw_reg        : in  rw_reg_type;
   -------- Trigger  Signals -------
   -- Local Input Trigger
   trig_in       : in  STD_LOGIC;
@@ -926,7 +1096,8 @@ architecture rtl of xtrig is
 -- Trigger detection Register
 signal trig_det_reg       : std_logic_vector (6 downto 0);
 -- Async Reg
-attribute ASYNC_REG of trig_det_reg(1 downto 0) : signal is "TRUE";
+attribute ASYNC_REG : STRING;
+--attribute ASYNC_REG of trig_det_reg(1 downto 0) : signal is "TRUE"; -- Modify to set as async
 --------------------
 -- Trigger Synchronization
 --------------------
@@ -963,7 +1134,7 @@ signal btrig_counter       : std_logic_vector (11 downto 0);
 signal timeout_done        : std_logic;
 signal start_timeout_counter : std_logic;
 signal timeout_counter     : std_logic_vector (1 downto 0);
-constant timeout           : std_logic_vector (1 downto 0) := x"2";
+constant timeout           : std_logic_vector (1 downto 0) := "10";
 --------------------
 -- RX Trigger
 --------------------
@@ -978,7 +1149,7 @@ begin
 --------------------
 -- Trigger Detector
 --------------------
-trig_det_pr: process(rst, trig_in)
+trig_det_pr: process(rst, trig_det_reg(trig_det_reg'high), trig_in)
 begin
   if rst = '1' or trig_det_reg(trig_det_reg'high) = '1' then
     trig_det_reg(0)    <= '0';
@@ -986,9 +1157,9 @@ begin
     trig_det_reg(0)    <= '1';
   end if;
 end process;
-trig_shift_pr: process(rst, clk)
+trig_shift_pr: process(rst, trig_det_reg(trig_det_reg'high), clk)
 begin
-  if rst = '1' or trig_det_reg(trig_det_reg'high) then
+  if rst = '1' or (trig_det_reg(trig_det_reg'high)='1') then
     trig_det_reg(trig_det_reg'high-1 DOWNTO 1)    <= (others => '0');
   elsif clk'event and clk='1' then
     trig_det_reg(trig_det_reg'high-1 DOWNTO 1)    <= trig_det_reg(trig_det_reg'high-2 DOWNTO 0);
@@ -1190,8 +1361,8 @@ begin
     end if;
   end if;
 end process;
-trigger    <= trigger_i   when rw_reg.test_trig_mode='0' else rw_reg.test_Ntrig;
-trigger_v  <= trigger_v_i when rw_reg.test_trig_mode='0' else '1';
+trigger    <= trigger_i   when rw_reg.test_mode='1' and rw_reg.test_trig_mode='0' else trig_counter; --else rw_reg.test_Ntrig;
+trigger_v  <= trigger_v_i when rw_reg.test_mode='1' and rw_reg.test_trig_mode='0' else '1';
 --------------------
 -- Status Register
 --------------------
@@ -1221,7 +1392,7 @@ end rtl;
 --
 ----------------------------------------------------------------------------------
 -- Revision History:
--- Revision 1.0 - 03/2016 - Albicocco P. - First Version
+-- Revision 2.0 - 03/2016 - Albicocco P. - Integrated Test Strategy 
 ----------------------------------------------------------------------------------
 -- Additional Comments:
 -- 
@@ -1229,6 +1400,7 @@ end rtl;
 LIBRARY ieee;
 USE ieee.std_logic_1164.ALL;
 USE ieee.numeric_std.ALL;
+USE ieee.std_logic_unsigned.ALL;
 
 library work;
 use work.xpack.all;
@@ -1238,7 +1410,7 @@ Port (
   clk           : in  STD_LOGIC;
   rst           : in  STD_LOGIC;
   -------- Status Registers -------
-  ro_reg        : inout ro_reg_type;
+  ro_reg        : out ro_reg_type;
   --------  Ctrl Registers  -------
   rw_reg        : in  rw_reg_type;
   -------- Test Control Bit -------
@@ -1249,6 +1421,7 @@ Port (
   A_Wr_en       : out STD_LOGIC;
   A_Full        : in  STD_LOGIC;
   A_Almost_full : in  STD_LOGIC;
+  A_Prog_full   : in  STD_LOGIC;
   A_busy        : out STD_LOGIC;
   -------- B FIFO Interface -------
   B_Wr_clk      : in  STD_LOGIC;
@@ -1256,6 +1429,7 @@ Port (
   B_Wr_en       : out STD_LOGIC;
   B_Full        : in  STD_LOGIC;
   B_Almost_full : in  STD_LOGIC;
+  B_Prog_full   : in  STD_LOGIC;
   B_busy        : out STD_LOGIC
 );
 end xtest;
@@ -1264,6 +1438,9 @@ architecture rtl of xtest is
 ------------------------------------------------------------------
 ---- COMPONENTS DECLARATION ----
 ------------------------------------------------------------------
+--------------------
+-- PRBS_ANY
+--------------------
 component PRBS_ANY 
 generic (      
   -- out alp:
@@ -1304,6 +1481,7 @@ SIGNAL test             : STD_LOGIC;
 --------------------
 SIGNAL a_inj            : STD_LOGIC_VECTOR(11 downto 0);
 SIGNAL a_req            : STD_LOGIC;
+SIGNAL areq             : STD_LOGIC;
 SIGNAL a_data           : STD_LOGIC_VECTOR(11 downto 0);
 --------------------
 -- PRBS_ANY: A EVENT GENERATION
@@ -1322,6 +1500,7 @@ SIGNAL achannel         : STD_LOGIC_VECTOR(6 downto 0);
 --------------------
 SIGNAL aw               : STD_LOGIC;
 SIGNAL ad               : STD_LOGIC_VECTOR(21 downto 0);
+SIGNAL A_Din_i          : STD_LOGIC_VECTOR(21 downto 0);
 SIGNAL ainc             : STD_LOGIC_VECTOR(11 downto 0);
 SIGNAL adone_reg        : STD_LOGIC;
 --------------------
@@ -1329,6 +1508,7 @@ SIGNAL adone_reg        : STD_LOGIC;
 --------------------
 SIGNAL b_inj            : STD_LOGIC_VECTOR(11 downto 0);
 SIGNAL b_req            : STD_LOGIC;
+SIGNAL breq             : STD_LOGIC;
 SIGNAL b_data           : STD_LOGIC_VECTOR(11 downto 0);
 --------------------
 -- PRBS_ANY: B EVENT GENERATION
@@ -1347,6 +1527,7 @@ SIGNAL bchannel         : STD_LOGIC_VECTOR(6 downto 0);
 --------------------
 SIGNAL bw               : STD_LOGIC;
 SIGNAL bd               : STD_LOGIC_VECTOR(21 downto 0);
+SIGNAL B_Din_i          : STD_LOGIC_VECTOR(21 downto 0);
 SIGNAL binc             : STD_LOGIC_VECTOR(11 downto 0);
 SIGNAL bdone_reg        : STD_LOGIC;
 
@@ -1357,6 +1538,8 @@ begin
 --------------------
 test              <= rw_reg.test_mode;
 test_mode         <= rw_reg.test_mode;
+A_busy            <= rw_reg.A_is_busy;
+B_busy            <= rw_reg.B_is_busy;
 --------------------
 -- ro_reg assignments
 --------------------
@@ -1366,37 +1549,41 @@ ro_reg.btest_Ntrig    <= binc;
 --------------------
 -- PRBS_ANY: A DATA GENERATION
 --------------------
+areq <= a_req and not A_Almost_full;
+a_inj <= (others => '0');
 a_data_gen: PRBS_ANY 
  GENERIC MAP(
     INV_PATTERN => A_INV_PATTERN,
     POLY_LENGHT => POLY_LENGHT,              
     POLY_TAP    => POLY_TAP,
-    NBITS       => a_data'high
+    NBITS       => a_data'high+1
  )
  PORT MAP(
   CHK_MODE      => '0',
   RST           => rst,
   CLK           => A_Wr_clk,
   DATA_IN       => a_inj,
-  EN            => a_req,
+  EN            => areq,
   DATA_OUT      => a_data
 );
 --------------------
 -- PRBS_ANY: B DATA GENERATION
 --------------------
+breq <= b_req and not B_Almost_full;
+b_inj <= (others => '0');
 b_data_gen: PRBS_ANY 
  GENERIC MAP(
     INV_PATTERN => B_INV_PATTERN,
     POLY_LENGHT => POLY_LENGHT,              
     POLY_TAP    => POLY_TAP,
-    NBITS       => b_data'high
+    NBITS       => b_data'high+1
  )
  PORT MAP(
   CHK_MODE      => '0',
   RST           => rst,
   CLK           => B_Wr_clk,
   DATA_IN       => b_inj,
-  EN            => b_req,
+  EN            => breq,
   DATA_OUT      => b_data
 );
 --------------------
@@ -1417,7 +1604,7 @@ aevent_gen: PRBS_ANY
   EN            => aev_req,
   DATA_OUT      => an_10bit
 );
-an <= std_logic_vector( unsigned('0' & an_10bit(9 downto 5)) + unsigned(an_10bit(4 downto 1)) + unsigned(an_10bit(0)) );
+an <= std_logic_vector( unsigned('0' & an_10bit(9 downto 5)) + unsigned(an_10bit(4 downto 1)) + unsigned(an_10bit(0 downto 0)) );
 --------------------
 -- PRBS_ANY: B EVENT GENERATION
 --------------------
@@ -1436,7 +1623,7 @@ bevent_gen: PRBS_ANY
   EN            => bev_req,
   DATA_OUT      => bn_10bit
 );
-bn <= std_logic_vector( unsigned('0' & bn_10bit(9 downto 5)) + unsigned(bn_10bit(4 downto 1)) + unsigned(bn_10bit(0)) );
+bn <= std_logic_vector( unsigned('0' & bn_10bit(9 downto 5)) + unsigned(bn_10bit(4 downto 1)) + unsigned(bn_10bit(0 downto 0)) );
 --------------------
 -- A FIFO STIMULI
 --------------------
@@ -1457,6 +1644,7 @@ begin
     a_dataexist  := '0';
     a_dataislast := '0';
     adone_reg    <= '0';
+    ad           <= (others => '0');
   elsif A_Wr_clk'event and A_Wr_clk='1' then
     adone_reg    <= adone;
     ainc         <= ainc;
@@ -1475,7 +1663,7 @@ begin
         if an/=std_logic_vector(to_unsigned(0, acnt'high)) then
           a_dataexist := '0';
         else 
-          a_dataexist :=  '1';
+          a_dataexist := '1';
         end if;
         ad <= '1' & a_dataexist & X"00" & ainc;
       else
@@ -1483,10 +1671,14 @@ begin
         if acnt=an then
           a_dataislast := '1';
         else 
-          a_dataislast :=  '0';
+          a_dataislast := '0';
         end if;
         ad <= '0' & a_dataislast & achannel & '0' & a_data;
       end if;
+    end if;
+    if A_Almost_full='1' then
+      -- Wait until A_Almost_full='0'
+      ad <= ad;
     end if;
     if test = '0' then
       -- Test mode is disabled
@@ -1518,6 +1710,7 @@ begin
     b_dataexist  := '0';
     b_dataislast := '0';
     bdone_reg    <= '0';
+    bd           <= (others => '0');
   elsif B_Wr_clk'event and B_Wr_clk='1' then
     bdone_reg    <= bdone;
     binc         <= binc;
@@ -1549,6 +1742,10 @@ begin
         bd <= '0' & b_dataislast & bchannel & '0' & b_data;
       end if;
     end if;
+    if B_Almost_full='1' then
+      -- Wait until B_Almost_full='0'
+      bd <= bd;
+    end if;
     if test = '0' then
       -- Test mode is disabled
       binc         <= (others => '0');
@@ -1562,55 +1759,61 @@ end process;
 --------------------
 -- A FIFO WRITE
 --------------------
+A_Din <= A_Din_i;
 aw_pr: process(rst, A_Wr_clk)
 begin
   if rst = '1' then
     acnt    <= (others => '0');
     achannel<= (others => '0');
     adone   <= '1';
-    A_Din   <= (others => '0');
+    A_Din_i <= (others => '0');
     A_Wr_en <= '0';
-    a_req   <= '0';
+    a_req   <= '1';
     aev_req <= '0';
   elsif A_Wr_clk'event and A_Wr_clk='1' then
     acnt    <= (others => '0');
     achannel<= (others => '0');
     adone   <= '1';
-    A_Din   <= (others => '0');
+    A_Din_i <= (others => '0');
     A_Wr_en <= '0';
-    a_req   <= '0';
+    a_req   <= a_req;
     aev_req <= '0';
     if aw = '1' or adone = '0' then
     -- Start FIFO Write
       adone   <= '0';
-      if acnt <= an then
+      if acnt <= std_logic_vector( unsigned(an)+1) then
       -- Write all requested data (1 header + an data)
-        A_Din   <= ad;
-        A_Wr_en <= '1';
-        acnt    <= std_logic_vector(unsigned(acnt) + 1);
+        A_Din_i <= ad;
+        A_Wr_en <= not aw;
+        if adone='0' then
+          acnt    <= std_logic_vector(unsigned(acnt) + 1);
+        else
+          acnt    <= acnt;
+        end if;
         achannel<= acnt;
-        if acnt = std_logic_vector(to_unsigned(0,acnt'high)) then
-          -- Request new data
-          a_req   <= '1';
-        elsif acnt = an then
+        if (acnt = an) or (acnt = std_logic_vector( unsigned(an)+1)) then
           -- Do not request new data
           a_req   <= '0';
+        elsif acnt = std_logic_vector(to_unsigned(0,acnt'high)) then
+          -- Request new data
+          a_req   <= not adone;
         else
           -- Request next data
           a_req   <= '1';
         end if;
-        if A_Full='1' then
-          -- Wait until A_Full='0'
+        if A_Almost_full='1' then
+          -- Wait until A_Almost_full='0'
           A_Wr_en <= '0';
+          A_Din_i <= A_Din_i;
           acnt    <= acnt;
           achannel<= achannel;
-          a_req   <= '0';
+          a_req   <= a_req;
         end if;
       else
         -- Done
         adone   <= '1';
         -- Request new event
-        aev_req <= '0';
+        aev_req <= '1';
       end if;
     end if;
     if test = '0' then
@@ -1618,7 +1821,7 @@ begin
       acnt    <= (others => '0');
       achannel<= (others => '0');
       adone   <= '1';
-      A_Din   <= (others => '0');
+      A_Din_i <= (others => '0');
       A_Wr_en <= '0';
       a_req   <= '0';
       aev_req <= '0';
@@ -1628,54 +1831,57 @@ end process;
 --------------------
 -- B FIFO WRITE
 --------------------
+B_Din <= B_Din_i;
 bw_pr: process(rst, B_Wr_clk)
 begin
   if rst = '1' then
     bcnt    <= (others => '0');
     bchannel<= (others => '0');
     bdone   <= '1';
-    B_Din   <= (others => '0');
+    B_Din_i <= (others => '0');
     B_Wr_en <= '0';
-    b_req   <= '0';
+    b_req   <= '1';
     bev_req <= '0';
   elsif B_Wr_clk'event and B_Wr_clk='1' then
     bcnt    <= (others => '0');
     bchannel<= (others => '0');
     bdone   <= '1';
-    B_Din   <= (others => '0');
+    B_Din_i <= (others => '0');
     B_Wr_en <= '0';
-    b_req   <= '0';
+    b_req   <= b_req;
     bev_req <= '0';
     if bw = '1' or bdone = '0' then
     -- Start FIFO Write
       bdone   <= '0';
-      if bcnt <= bn then
+      if bcnt <= std_logic_vector( unsigned(bn)+1) then
       -- Write all requested data (1 header + an data)
-        B_Wr_en <= '1';
-        bcnt    <= std_logic_vector( unsigned(bcnt) + 1 );
-        bchannel<= bcnt;
-        if bcnt = std_logic_vector( to_unsigned(0,bcnt'high) ) then
+        B_Din_i <= bd;
+        B_Wr_en <= not bw;
+        if bdone='0' then
           -- Write Header
-          B_Din   <= bd;
-          -- Request new data
-          b_req   <= '1';
-        elsif bcnt = bn then
-          -- Write actual data
-          B_Din   <= bd;
+          bcnt    <= std_logic_vector(unsigned(bcnt) + 1);
+        else
+          -- Write Data
+          bcnt    <= bcnt;
+        end if;
+        bchannel<= bcnt;
+        if (bcnt = bn) or (bcnt = std_logic_vector( unsigned(bn)+1)) then
           -- Do not request new data
           b_req   <= '0';
+        elsif bcnt = std_logic_vector( to_unsigned(0,bcnt'high) ) then
+          -- Request new data
+          b_req   <= not bdone;
         else
-          -- Write actual data
-          B_Din   <= bd;
           -- Request next data
           b_req   <= '1';
         end if;
-        if B_Full='1' then
-          -- Wait until B_Full='0'
+        if B_Almost_full='1' then
+          -- Wait until B_Almost_full='0'
           B_Wr_en <= '0';
+          B_Din_i <= B_Din_i;
           bcnt    <= bcnt;
           bchannel<= bchannel;
-          b_req   <= '0';
+          b_req   <= b_req;
         end if;
       else
         -- Done
@@ -1689,7 +1895,7 @@ begin
       bcnt    <= (others => '0');
       bchannel<= (others => '0');
       bdone   <= '1';
-      B_Din   <= (others => '0');
+      B_Din_i <= (others => '0');
       B_Wr_en <= '0';
       b_req   <= '0';
       bev_req <= '0';
@@ -1713,6 +1919,7 @@ end rtl;
 ----------------------------------------------------------------------------------
 -- Revision History:
 -- Revision 1.0 - 02/2016 - Albicocco P. - First Version
+-- Revision 2.0 - 03/2016 - Albicocco P. - Integrated Test Strategy 
 ----------------------------------------------------------------------------------
 -- Additional Comments:
 -- 
@@ -1733,6 +1940,7 @@ Port (
   A_Din         : in STD_LOGIC_VECTOR(22-1 DOWNTO 0);
   A_Wr_en       : in STD_LOGIC;
   A_Full        : out STD_LOGIC;
+  A_Prog_full   : out STD_LOGIC;
   A_Almost_full : out STD_LOGIC;
   A_Rd_en       : in STD_LOGIC;
   A_Dout        : out STD_LOGIC_VECTOR(22-1 DOWNTO 0);
@@ -1743,6 +1951,7 @@ Port (
   B_Din         : in STD_LOGIC_VECTOR(22-1 DOWNTO 0);
   B_Wr_en       : in STD_LOGIC;
   B_Full        : out STD_LOGIC;
+  B_Prog_full   : out STD_LOGIC;
   B_Almost_full : out STD_LOGIC;
   B_Rd_en       : in STD_LOGIC;
   B_Dout        : out STD_LOGIC_VECTOR(22-1 DOWNTO 0);
@@ -1765,6 +1974,7 @@ port (
   Rd_en       : in STD_LOGIC;
   Dout        : out STD_LOGIC_VECTOR(22-1 DOWNTO 0);
   Full        : out STD_LOGIC;
+  Almost_full : out STD_LOGIC;
   prog_full   : out STD_LOGIC;
   Empty       : out STD_LOGIC;
   Valid       : out STD_LOGIC
@@ -1786,7 +1996,8 @@ port map(
   Rd_en       => A_Rd_en,
   Dout        => A_Dout,
   Full        => A_Full,
-  prog_full   => A_Almost_full,
+  Almost_full => A_Almost_full,
+  prog_full   => A_Prog_full,
   Empty       => A_Empty,
   Valid       => A_Valid
 );
@@ -1803,7 +2014,8 @@ port map(
   Rd_en       => B_Rd_en,
   Dout        => B_Dout,
   Full        => B_Full,
-  prog_full   => B_Almost_full,
+  Almost_full => B_Almost_full,
+  prog_full   => B_Prog_full,
   Empty       => B_Empty,
   Valid       => B_Valid
 );
@@ -1826,6 +2038,7 @@ end rtl;
 ----------------------------------------------------------------------------------
 -- Revision History:
 -- Revision 1.0 - 02/2016 - Albicocco P. - First Version
+-- Revision 2.0 - 03/2016 - Albicocco P. - Integrated Test Strategy 
 ----------------------------------------------------------------------------------
 -- Additional Comments:
 -- Data from FIFO:
@@ -2004,7 +2217,7 @@ begin
           nstate   <= SEND_B_DATA;
           a_rd_en  <= '0';
         else
-        -- Disable A,B
+        -- Request new A and B Header
           nstate   <= NOFOUNDDATA;
           x_nodata  <= '1';
         end if;
@@ -2021,18 +2234,23 @@ begin
     end if;
   when WAITBHEADER =>
     if is_header(b_d, b_dv) then
-    -- Both Headers found: go in send state and request new data 
+    -- Both Headers found: go in send state and request new data to be sent
       b_header  <= get_header(b_d, b_dv);
       x_hdr_dv   <= '1';
       if dataexist(a_d, a_dv) and dataexist(b_d, b_dv) then
+      -- Disable B, Request A
         nstate   <= SEND_ABDATA;
         b_rd_en  <= '0';
       elsif dataexist(a_d, a_dv) then
+      -- Disable B, Request A
         nstate   <= SEND_A_DATA;
         b_rd_en  <= '0';
       elsif dataexist(b_d, b_dv) then
+      -- Disable A, Request B
         nstate   <= SEND_B_DATA;
+        a_rd_en  <= '0';
       else
+      -- Request new A and B Header
         nstate   <= NOFOUNDDATA;
         x_nodata  <= '1';
       end if;
@@ -2080,7 +2298,7 @@ begin
     b_rd_en  <= x_rd_en;
     a_rd_en  <= '0';
     x_dv     <= b_dv;
-    x_d      <= b_d(19 downto 0)+(std_logic_vector(to_unsigned(48,7)) & '0' & x"000");
+    x_d      <= std_logic_vector(unsigned(b_d(19 downto 0))+unsigned((std_logic_vector(to_unsigned(48,7)) & '0' & x"000")));
     nstate   <= SEND_B_DATA;
     -- Check for last data
     if is_last(b_d, b_dv) then
@@ -2142,6 +2360,7 @@ end rtl;
 ----------------------------------------------------------------------------------
 -- Revision History:
 -- Revision 1.0 - 02/2016 - Albicocco P. - First Version
+-- Revision 2.0 - 03/2016 - Albicocco P. - Integrated Test Strategy 
 ----------------------------------------------------------------------------------
 -- Additional Comments:
 -- 
@@ -2271,11 +2490,11 @@ end component OBUFTV;
 --constant thold15             : integer := (15-clock_period/2)/clock_period;
 -- internal to output
 constant thold35             : integer := (1000*(35+clock_period)-1)/1000/clock_period-1;
-constant thold15             : integer := (1000*(15+clock_period)-1)/1000/clock_period-1;
+constant thold15             : integer := (1000*(15+clock_period)-1)/1000/clock_period;
 --------------------
 -- Counter
 --------------------
-constant Ncnt				        : integer := 1+log2(thold35);
+constant Ncnt				        : integer := 1+log2(thold15);
 ------------------------------------------------------------------
 ---- SIGNALS ----
 ------------------------------------------------------------------
@@ -2562,7 +2781,7 @@ full    <= i_full or full_r;
 -- Slave has an error, Active LOW
 oberr_n <= not i_mmatch;
 -- Slave is full, Active LOW
-obusy_n <= not full;
+--obusy_n <= not full;
 
 -------- COUNTER -------
 -- Counter Seq. Network
@@ -2695,7 +2914,7 @@ begin
 end process;
 
 -- Output Transition Functions
-ocomb_pr: process(pstate,ids, cvalid, ssel, i_last, ias_n, i_d, first_word_flag_r, i_nodata, i_dv, i_t, i_tv, i_hdr_d, i_mmatch, i_hdr_dv, it) is
+ocomb_pr: process(pstate,ids, cvalid, ssel, i_last, ias_n, i_d, isyncrd_n, first_word_flag_r, i_nodata, i_dv, i_t, i_tv, i_hdr_d, i_mmatch, i_hdr_dv, it) is
 begin
   read_data       <= '0';
   first_word_flag <= '0';
@@ -2711,7 +2930,7 @@ begin
     -- Slave has an error, Active LOW
     oberr_n <= '1';
     -- Slave is full, Active LOW
-    obusy_n <= '1';
+    obusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
@@ -2750,13 +2969,13 @@ begin
       -- Wait for the end of the trigger cycle (i.e. xtrgv = '1')
       obk <= '1';
       done <= '1';
-      read_data <= i_nodata;
+      read_data <= i_nodata and isyncrd_n;
     end if;
     -------- ROCK OPEN COLLECOTR INPUT -------
     -- Slave has an error, Active LOW
     oberr_n <= '1';
     -- Slave is full, Active LOW
-    obusy_n <= '1';
+    obusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
@@ -2779,7 +2998,7 @@ begin
     -- Slave has an error, Active LOW
     oberr_n <= '1';
     -- Slave is full, Active LOW
-    obusy_n <= '1';
+    obusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
@@ -2839,7 +3058,7 @@ begin
     -- Slave has an error, Active LOW
     oberr_n <= '1';
     -- Slave is full, Active LOW
-    obusy_n <= '1';
+    obusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
@@ -3108,7 +3327,7 @@ end rtl;
 --
 ----------------------------------------------------------------------------------
 -- Revision History:
--- Revision 1.0 - 03/2016 - Albicocco P. - First Version
+-- Revision 2.0 - 03/2016 - Albicocco P. - Integrated Test Strategy 
 ----------------------------------------------------------------------------------
 -- Additional Comments:
 -- 
@@ -3199,8 +3418,8 @@ end xaxi;
 architecture arch_imp of xaxi is
 
   -- Read Only Registers
-  type ro_reg_mat_type is array (69 DOWNTO 0) of std_logic (31 DOWNTO 0);
-  signal ro_reg_mat : ro_reg_mat_type := ((others => '0'));
+  type ro_reg_mat_type is array (69 DOWNTO 0) of std_logic_vector (31 DOWNTO 0);
+  signal ro_reg_mat : ro_reg_mat_type := (others => (others =>'0'));
   -- AXI4LITE signals
   signal axi_awaddr : std_logic_vector(C_S_AXI_ADDR_WIDTH-1 downto 0);
   signal axi_awready: std_logic;
@@ -3212,6 +3431,11 @@ architecture arch_imp of xaxi is
   signal axi_rdata  : std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
   signal axi_rresp  : std_logic_vector(1 downto 0);
   signal axi_rvalid : std_logic;
+  -- FIFO Signals
+  signal A_req       : std_logic := '0';
+  signal A_req_r     : std_logic := '0';
+  signal B_req       : std_logic := '0';
+  signal B_req_r     : std_logic := '0';
 
   -- Example-specific design signals
   -- local parameter for addressing 32 bit / 64 bit C_S_AXI_DATA_WIDTH
@@ -3225,19 +3449,28 @@ architecture arch_imp of xaxi is
   --------------------------------------------------
   ---- Number of Slave Registers 128
   -- Reset Register
-  signal slv_reg0   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := (0            => rw_defaults.reset,
-                                                                         1            => rw_defaults.fiforeset,
-                                                                         2            => rw_defaults.triggerreset,
-                                                                         31 DOWNTO 3  => (others => '0') );
+  signal slv_reg0   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := ( x"0000000" & '0' &             -- 31 DOWNTO 3
+                                                                          rw_defaults.triggerreset &     -- 2: Trigger Counters Reset (A+B+Local)
+                                                                          rw_defaults.fiforeset &        -- 1: Reset FIFOs
+                                                                          rw_defaults.reset );           -- 0: Reset Aux Bus
   -- Test Register
-  signal slv_reg1   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := (0            => rw_defaults.test_mode,
-                                                                         1            => rw_defaults.test_trig_mode,
-                                                                         2  DOWNTO 3  => "00",
-                                                                         15 DOWNTO 4  => rw_defaults.test_Ntrig,
-                                                                         31 DOWNTO 16 => (others => '0') );
-  signal slv_reg2   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
-  signal slv_reg3   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
-  signal slv_reg4   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
+  signal slv_reg1   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := ( x"0000" &                      -- 31 DOWNTO 16
+                                                                          rw_defaults.test_Ntrig &       -- 15 DOWNTO 4: Unused
+                                                                          rw_defaults.B_is_busy &        -- 3: B Busy flag in test mode
+                                                                          rw_defaults.A_is_busy &        -- 2: A Busy flag in test mode
+                                                                          rw_defaults.test_trig_mode &   -- 1: Trigger Test Mode : '0' : count real trigger, '1' : Count trigger only in Local FPGA
+                                                                          rw_defaults.test_mode );       -- 0: Enable Test Mode: 0 Disable, 1 Enable.
+  -- FIFO Control Register
+  signal slv_reg2   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := ( x"0000_00" & b"00" &           -- 31 DOWNTO 6
+                                                                          rw_defaults.B_FIFO_write_en &  -- 5: Enable Write from B FIFO
+                                                                          rw_defaults.A_FIFO_write_en &  -- 4: Enable Write from A FIFO
+                                                                          b"00" &                        -- 3 DOWNTO 2
+                                                                          rw_defaults.B_FIFO_read_en &   -- 1: Enable Read from B FIFO
+                                                                          rw_defaults.A_FIFO_read_en );  -- 0: Enable Read from A FIFO
+  -- A FIFO Write Data
+  signal slv_reg3   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);-- := ( rw_defaults.A_write_data );    -- 22 DOWNTO 0
+  -- B FIFO Write DATA
+  signal slv_reg4   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);-- := ( rw_defaults.B_write_data );    -- 22 DOWNTO 0
   signal slv_reg5   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
   signal slv_reg6   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
   signal slv_reg7   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
@@ -3368,7 +3601,7 @@ architecture arch_imp of xaxi is
 
 begin
 
-areset <= not S_AXI_ARESETN;
+--areset <= not S_AXI_ARESETN;
   -- I/O Connections assignments
 
   S_AXI_AWREADY <= axi_awready;
@@ -3394,8 +3627,14 @@ areset <= not S_AXI_ARESETN;
           -- slave is ready to accept write address when
           -- there is a valid write address and write data
           -- on the write address and data bus. This design 
-          -- expects no outstanding transactions. 
-          axi_awready <= '1';
+          -- expects no outstanding transactions.
+          if S_AXI_AWADDR = b"0000011" & "00" then
+            axi_awready <= not ro_reg.A_afull;
+          elsif S_AXI_AWADDR = b"0000100" & "00" then
+            axi_awready <= not ro_reg.B_afull;
+          else
+            axi_awready <= '1';
+          end if; 
         else
           axi_awready <= '0';
         end if;
@@ -3437,7 +3676,13 @@ areset <= not S_AXI_ARESETN;
             -- there is a valid write address and write data
             -- on the write address and data bus. This design 
             -- expects no outstanding transactions.           
-            axi_wready <= '1';
+            if S_AXI_AWADDR = b"0000011" & "00" then
+              axi_wready <= not ro_reg.A_afull;
+            elsif S_AXI_AWADDR = b"0000100" & "00" then
+              axi_wready <= not ro_reg.B_afull;
+            else
+              axi_wready <= '1';
+            end if; 
         else
           axi_wready <= '0';
         end if;
@@ -3458,24 +3703,38 @@ areset <= not S_AXI_ARESETN;
   variable loc_addr :std_logic_vector(OPT_MEM_ADDR_BITS downto 0); 
   begin
     if rising_edge(S_AXI_ACLK) then 
+      rw_reg.A_write_data <= (others => '0');
+      rw_reg.A_write_en   <= '0';
+      rw_reg.B_write_data <= (others => '0');
+      rw_reg.B_write_en   <= '0';
       if S_AXI_ARESETN = '0' then
         -- Reset Register
-        slv_reg0    <= ( 0            => rw_defaults.reset,
-                         1            => rw_defaults.fiforeset,
-                         2            => rw_defaults.triggerreset,
-                         31 DOWNTO 3  => (others => '0') );
+  -- Reset Register
+        slv_reg0    <= ( x"0000000" & '0' &             -- 31 DOWNTO 3 
+                         rw_defaults.triggerreset &     -- 2           
+                         rw_defaults.fiforeset &        -- 1           
+                         rw_defaults.reset );           -- 0            
         -- Test Register
-        slv_reg1    <= ( 0            => rw_defaults.test_mode,
-                         1            => rw_defaults.test_trig_mode,
-                         2  DOWNTO 3  => "00",
-                         15 DOWNTO 4  => rw_defaults.test_Ntrig,
-                         31 DOWNTO 16 => (others => '0') );
-        slv_reg2    <= (others => '0');
+        slv_reg1    <= ( x"0000" &                      -- 31 DOWNTO 16
+                         rw_defaults.test_Ntrig &       -- 15 DOWNTO 4 
+                         rw_defaults.B_is_busy &        -- 3           
+                         rw_defaults.A_is_busy &        -- 2           
+                         rw_defaults.test_trig_mode &   -- 1           
+                         rw_defaults.test_mode );       -- 0           
+        slv_reg2    <= ( x"0000_00" & b"00" &           -- 31 DOWNTO 2
+                         rw_defaults.B_FIFO_write_en &  -- 5: Enable Read from B FIFO
+                         rw_defaults.A_FIFO_write_en &  -- 4: Enable Read from A FIFO
+                         b"00" &                        -- 3 DOWNTO 2
+                         rw_defaults.B_FIFO_read_en &   -- 1: Enable Read from B FIFO
+                         rw_defaults.A_FIFO_read_en );  -- 0: Enable Read from A FIFO
+        -- A Write Data (reg 3): rw_reg.A_write_data
         slv_reg3    <= (others => '0');
+        -- B Write Data (reg 4): rw_reg.B_write_data
         slv_reg4    <= (others => '0');
+        --
         slv_reg5    <= (others => '0');
         slv_reg6    <= (others => '0');
-        slv_reg7    <= (others => '0');
+        slv_reg7    <= (others => '0'); 
         slv_reg8    <= (others => '0');
         slv_reg9    <= (others => '0');
         slv_reg10   <= (others => '0');
@@ -3601,7 +3860,9 @@ areset <= not S_AXI_ARESETN;
         slv_reg32   <= ro_reg_mat(0);
         slv_reg33   <= ro_reg_mat(1);
         slv_reg34   <= ro_reg_mat(2);
+        -- Used for A FIFO DATA Read
         slv_reg35   <= ro_reg_mat(3);
+        -- Used for B FIFO DATA Read
         slv_reg36   <= ro_reg_mat(4);
         slv_reg37   <= ro_reg_mat(5);
         slv_reg38   <= ro_reg_mat(6);
@@ -3700,7 +3961,8 @@ areset <= not S_AXI_ARESETN;
                 if ( S_AXI_WSTRB(byte_index) = '1' ) then
                   -- Respective byte enables are asserted as per write strobes                   
                   -- slave registor 3
-                  slv_reg3(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
+                  rw_reg.A_write_data(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8); --S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
+                  rw_reg.A_write_en <= '1';
                 end if;
               end loop;
             when b"0000100" =>
@@ -3708,7 +3970,8 @@ areset <= not S_AXI_ARESETN;
                 if ( S_AXI_WSTRB(byte_index) = '1' ) then
                   -- Respective byte enables are asserted as per write strobes                   
                   -- slave registor 4
-                  slv_reg4(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
+                  rw_reg.B_write_data(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8); --S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
+                  rw_reg.B_write_en <= '1';
                 end if;
               end loop;
             when b"0000101" =>
@@ -4697,7 +4960,7 @@ areset <= not S_AXI_ARESETN;
               end loop;
             when others =>
             --------------------- Read Write Registers  -------------------
-                                    -- The register are written starting from the right (i.e. LSB)
+              -- The register are written starting from the right (i.e. LSB)
               slv_reg0 <= slv_reg0;
               slv_reg1 <= slv_reg1;
               slv_reg2 <= slv_reg2;
@@ -4796,13 +5059,23 @@ areset <= not S_AXI_ARESETN;
   process (S_AXI_ACLK)
   begin
     if rising_edge(S_AXI_ACLK) then 
+      A_req       <= '0';
+      B_req       <= '0';
       if S_AXI_ARESETN = '0' then
         axi_arready <= '0';
         axi_araddr  <= (others => '1');
       else
         if (axi_arready = '0' and S_AXI_ARVALID = '1') then
           -- indicates that the slave has acceped the valid read address
-          axi_arready <= '1';
+          if S_AXI_ARADDR = b"0100011" & "00" then -- 35
+            axi_arready <= not ro_reg.A_empty;
+            A_req       <= not ro_reg.A_empty;
+          elsif S_AXI_ARADDR = b"0100100" & "00" then -- 36
+            axi_arready <= not ro_reg.B_empty;
+            B_req       <= not ro_reg.B_empty;
+          else
+            axi_arready <= '1';
+          end if;
           -- Read Address latching 
           axi_araddr  <= S_AXI_ARADDR;           
         else
@@ -4823,17 +5096,27 @@ areset <= not S_AXI_ARESETN;
   process (S_AXI_ACLK)
   begin
     if rising_edge(S_AXI_ACLK) then
+      rw_reg.A_read_en <= '0';
+      rw_reg.B_read_en <= '0';
       if S_AXI_ARESETN = '0' then
         axi_rvalid <= '0';
         axi_rresp  <= "00";
+        A_req_r     <= '0';
+        B_req_r     <= '0';
       else
         if (axi_arready = '1' and S_AXI_ARVALID = '1' and axi_rvalid = '0') then
           -- Valid read data is available at the read data bus
           axi_rvalid <= '1';
           axi_rresp  <= "00"; -- 'OKAY' response
+          A_req_r     <= A_req;
+          B_req_r     <= B_req;
         elsif (axi_rvalid = '1' and S_AXI_RREADY = '1') then
           -- Read data is accepted by the master
           axi_rvalid <= '0';
+          A_req_r     <= '0';
+          B_req_r     <= '0';
+          rw_reg.A_read_en <= A_req_r;
+          rw_reg.B_read_en <= B_req_r;
         end if;            
       end if;
     end if;
@@ -4921,9 +5204,9 @@ areset <= not S_AXI_ARESETN;
         when b"0100010" =>
           reg_data_out <= slv_reg34;
         when b"0100011" =>
-          reg_data_out <= slv_reg35;
+          reg_data_out <= x"00" & b"00" & ro_reg.A_read_data;
         when b"0100100" =>
-          reg_data_out <= slv_reg36;
+          reg_data_out <= x"00" & b"00" & ro_reg.B_read_data;
         when b"0100101" =>
           reg_data_out <= slv_reg37;
         when b"0100110" =>
@@ -5144,14 +5427,31 @@ areset <= not S_AXI_ARESETN;
   ro_reg_mat(1)(12)            <= ro_reg.Ntrig_voter_v;
   -- Voted Trigger Number
   ro_reg_mat(1)(11 DOWNTO 0)   <= ro_reg.Ntrig_voter;
-  -------- Trigger COunters -------
+  -------- Trigger Counters -------
   -- Local Trigger Number
   ro_reg_mat(1)(27 DOWNTO 16)  <= ro_reg.Ntrig_local;
   -- FPGA A Trigger Number
   ro_reg_mat(2)(11 DOWNTO 0)   <= ro_reg.Ntrig_devA;
   -- FPGA B Trigger Number
   ro_reg_mat(2)(27 DOWNTO 16)  <= ro_reg.Ntrig_devB;
-
+  -- Reg 35 and 36 used to read data from A and B FIFO respectively.
+  -------- XFIFO -------
+  -- A FIFO Full
+  ro_reg_mat(5)(0)             <= ro_reg.AFIFO_isfull;
+  -- A FIFO Almost Full
+  ro_reg_mat(5)(1)             <= ro_reg.AFIFO_isafull;
+  -- A FIFO Prog Full
+  ro_reg_mat(5)(2)             <= ro_reg.AFIFO_ispfull;
+  -- A FIFO Empty
+  ro_reg_mat(5)(3)             <= ro_reg.AFIFO_isempty;
+  -- B FIFO Full
+  ro_reg_mat(5)(4)             <= ro_reg.BFIFO_isfull;
+  -- B FIFO Almost Full
+  ro_reg_mat(5)(5)             <= ro_reg.BFIFO_isafull;
+  -- B FIFO Prog Full
+  ro_reg_mat(5)(6)             <= ro_reg.BFIFO_ispfull;
+  -- B FIFO Empty
+  ro_reg_mat(5)(7)             <= ro_reg.BFIFO_isempty;
 
   --------------------
   -- rw_reg: Read Write Registers
@@ -5170,6 +5470,14 @@ areset <= not S_AXI_ARESETN;
   rw_reg.test_trig_mode        <= slv_reg1(1);
   -- Test Trigger Number
   rw_reg.test_Ntrig            <= slv_reg1(15 DOWNTO 4);
+  -- A Busy flag in test mode
+  rw_reg.A_is_busy             <= slv_reg1(2);
+  -- B Busy flag in test mode
+  rw_reg.B_is_busy             <= slv_reg1(3);
+  -------- AXI FIFO -------
+  rw_reg.A_FIFO_read_en        <= slv_reg2(0);
+  rw_reg.B_FIFO_read_en        <= slv_reg2(1);
+  rw_reg.A_FIFO_write_en       <= slv_reg2(4);
+  rw_reg.B_FIFO_write_en       <= slv_reg2(5);
   
-
 end arch_imp;

@@ -13,6 +13,7 @@
 ----------------------------------------------------------------------------------
 -- Revision History:
 -- Revision 1.0 - Albicocco P. - First Version
+-- Revision 2.0 - 03/2016 - Albicocco P. - Integrated Test Strategy 
 ----------------------------------------------------------------------------------
 -- Additional Comments:
 -- set StdArithNoWarnings 1
@@ -20,18 +21,24 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use ieee.std_logic_unsigned.ALL;
 
 library UNISIM;
 use UNISIM.VComponents.all;
 
 entity tb is
+Generic (
+  test_env : integer := 2 -- 0 : Test AXI-4 Lite Interface to/from A and B FIFO.
+                          -- 1 : Test AUX BUS by using the internal PRBS generator.
+                          -- 2 : Test AUX BUS by using stimuli from testbench.
+);
 end tb;
 
 architecture a of tb is
 ------------------------------------------------------------------
 ---- FUNCTIONS ----
 ------------------------------------------------------------------
-
+ 
 ------------------------------------------------------------------
 ---- CONSTANTS ----
 ------------------------------------------------------------------
@@ -42,7 +49,10 @@ constant clk_period   : time    := 10 ns;
 ------------------------------------------------------------------
 component auxbus is
 Generic (
-  clock_period : integer := 10
+  clock_period : integer := 10;
+  -------- AXI-4  LITE -------
+  C_S_AXI_DATA_WIDTH  : integer := 32;
+  C_S_AXI_ADDR_WIDTH  : integer := 9
   );
 Port (
   -------- SYSTEM SIGNALS -------
@@ -51,6 +61,13 @@ Port (
   clk2x : in STD_LOGIC;
   -- System reset
   rst : in STD_LOGIC;
+  --------  Trigger PORTS  -------
+  -- Local Input Trigger
+  trig_in       : in  STD_LOGIC;
+  -- A Input Trigger
+  atrig_det     : in  STD_LOGIC;
+  -- B Input Trigger
+  btrig_det     : in  STD_LOGIC;
   -------- A FIFO Interface -------
   A_Wr_clk      : in STD_LOGIC;
   A_Din         : in STD_LOGIC_VECTOR(22-1 DOWNTO 0);
@@ -63,6 +80,28 @@ Port (
   B_Wr_en       : in STD_LOGIC;
   B_Full        : out STD_LOGIC;
   B_Almost_full : out STD_LOGIC;
+  -------- AXI-4  LITE -------
+  S_AXI_ACLK    : in  std_logic;
+  S_AXI_ARESETN : in  std_logic;
+  S_AXI_AWADDR  : in  std_logic_vector(C_S_AXI_ADDR_WIDTH-1 downto 0);
+  S_AXI_AWPROT  : in  std_logic_vector(2 downto 0);
+  S_AXI_AWVALID : in  std_logic;
+  S_AXI_AWREADY : out std_logic;
+  S_AXI_WDATA   : in  std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
+  S_AXI_WSTRB   : in  std_logic_vector((C_S_AXI_DATA_WIDTH/8)-1 downto 0);
+  S_AXI_WVALID  : in  std_logic;
+  S_AXI_WREADY  : out std_logic;
+  S_AXI_BRESP   : out std_logic_vector(1 downto 0);
+  S_AXI_BVALID  : out std_logic;
+  S_AXI_BREADY  : in  std_logic;
+  S_AXI_ARADDR  : in  std_logic_vector(C_S_AXI_ADDR_WIDTH-1 downto 0);
+  S_AXI_ARPROT  : in  std_logic_vector(2 downto 0);
+  S_AXI_ARVALID : in  std_logic;
+  S_AXI_ARREADY : out std_logic;
+  S_AXI_RDATA   : out std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
+  S_AXI_RRESP   : out std_logic_vector(1 downto 0);
+  S_AXI_RVALID  : out std_logic;
+  S_AXI_RREADY  : in  std_logic;
   -------- ROCK OUTPUT -------
   -- Trigger Bus, first valid trigger is 001
   xt : in STD_LOGIC_VECTOR (11 downto 0);
@@ -104,6 +143,42 @@ Port (
   sa : in STD_LOGIC_VECTOR (3 downto 0)
 );
 end component auxbus;
+--------------------
+-- PRBS_ANY
+--------------------
+component PRBS_ANY 
+generic (      
+  -- out alp:
+  --CHK_MODE: boolean := false; 
+  INV_PATTERN     : boolean := false;
+  POLY_LENGHT     : natural range 0 to 63  := 31;
+  POLY_TAP        : natural range 0 to 63  := 3;
+  NBITS           : natural range 0 to 512 := 22
+);
+port (
+  -- in alp:
+  CHK_MODE        : in  std_logic;
+  RST             : in  std_logic;                            -- sync reset active high
+  CLK             : in  std_logic;                            -- system clock
+  DATA_IN         : in  std_logic_vector(NBITS - 1 downto 0); -- inject error/data to be checked
+  EN              : in  std_logic;                            -- enable/pause pattern generation
+  DATA_OUT        : out std_logic_vector(NBITS - 1 downto 0)  -- generated prbs pattern/errors found
+);
+end component;
+------------------------------------------------------------------
+---- CONSTANTS  DECLARATION ----
+------------------------------------------------------------------
+--------------------
+-- PRBS_ANY
+--------------------
+-- PRBS-15 Settings
+constant A_INV_PATTERN : boolean := true;
+constant B_INV_PATTERN : boolean := false;
+constant POLY_LENGHT   : natural range 0 to 63  := 15;
+constant POLY_TAP      : natural range 0 to 63  := 14;
+------------------------------------------------------------------
+---- FUNCTIONS ----
+-----------------------------------------------------------------
 --------------------
 -- and_reduce
 --------------------
@@ -183,6 +258,44 @@ signal sa : STD_LOGIC_VECTOR (3 downto 0);
 --------------------
 -- stimuli reset
 signal rstt   : std_logic := '1';
+signal trigger: std_logic := '0';
+--------------------
+-- AXI-4 LITE
+--------------------
+-- Width of S_AXI data bus
+constant C_S_AXI_DATA_WIDTH  : integer := 32;
+-- Width of S_AXI address bus
+constant C_S_AXI_ADDR_WIDTH  : integer := 9;
+-- Global Signals
+signal S_AXI_ACLK    : STD_LOGIC := '0';
+signal S_AXI_ARESETN : STD_LOGIC := '1';
+-- Address Write Channel
+signal S_AXI_AWADDR  : STD_LOGIC_VECTOR (C_S_AXI_ADDR_WIDTH-1 downto 0) := "000000000";
+signal S_AXI_AWPROT  : STD_LOGIC_VECTOR (2 downto 0) := "000";
+signal S_AXI_AWVALID : STD_LOGIC := '0';
+signal S_AXI_AWREADY : STD_LOGIC;
+-- Data Write Channel
+signal S_AXI_WDATA   : STD_LOGIC_VECTOR (C_S_AXI_DATA_WIDTH-1 downto 0) := x"0000_0000";
+signal S_AXI_WSTRB   : STD_LOGIC_VECTOR ((C_S_AXI_DATA_WIDTH/8)-1 downto 0) := x"0";
+signal S_AXI_WVALID  : STD_LOGIC := '0';
+signal S_AXI_WREADY  : STD_LOGIC;
+-- Write Response Channel
+signal S_AXI_BRESP   : STD_LOGIC_VECTOR (1 downto 0);
+signal S_AXI_BVALID  : STD_LOGIC;
+signal S_AXI_BREADY  : STD_LOGIC := '0';
+-- Address Read Channel
+signal S_AXI_ARADDR  : STD_LOGIC_VECTOR (C_S_AXI_ADDR_WIDTH-1 downto 0) := "000000000";
+signal S_AXI_ARPROT  : STD_LOGIC_VECTOR (2 downto 0) := "000";
+signal S_AXI_ARVALID : STD_LOGIC := '0';
+signal S_AXI_ARREADY : STD_LOGIC; 
+-- Data Read Channel
+signal S_AXI_RDATA   : STD_LOGIC_VECTOR (C_S_AXI_DATA_WIDTH-1 downto 0); 
+signal S_AXI_RRESP   : STD_LOGIC_VECTOR (1 downto 0); 
+signal S_AXI_RVALID  : STD_LOGIC; 
+signal S_AXI_RREADY  : STD_LOGIC := '0';
+-- Test Signals
+signal axi_rx_data   : STD_LOGIC_VECTOR (C_S_AXI_DATA_WIDTH-1 downto 0) := x"0000_0000"; 
+signal axi_rx_dv     : STD_LOGIC := '0';
 --------------------
 -- FIFO WRITE
 --------------------
@@ -211,14 +324,26 @@ signal xd_inertial   : std_logic_vector(19 downto 0) := (others => '0');
 --------------------
 -- CHECK RX DATA
 --------------------
+signal xeob_n_i      : std_logic;
+signal xeob_n_t      : std_logic;
+signal a_data        : std_logic_vector(11 downto 0) := (others => '0');
+signal a_valid       : std_logic := '0';
+signal a_data_check  : std_logic_vector(11 downto 0) := (others => '0');
+signal a_clk         : std_logic := '1';
+signal b_data        : std_logic_vector(11 downto 0) := (others => '0');
+signal b_valid       : std_logic := '0';
+signal b_data_check  : std_logic_vector(11 downto 0) := (others => '0');
+signal b_clk         : std_logic := '1';
 signal ssel          : std_logic;
 signal test          : std_logic := 'Z';
-
+signal xdk_i         : std_logic;
 begin
 --------------------
 -- CHECK RX DATA
 --------------------
 ssel <= and_reduce (xa xnor sa);
+xeob_n_t      <= '1' when xeob_n = '1' else '0' when (xeob_n = '0' or xeob_n = 'Z') else 'X';
+xdk_i         <= '0' when xdk = '0' else '1';
 process
 variable inc          : integer   := 0;
 variable van          : integer   := 0;
@@ -230,25 +355,103 @@ begin
   if xsyncrd_n = '0' then
     wait until rising_edge(xsyncrd_n);
   else
-    van := inc mod 9;
-    vbn := inc mod 7;
-    for ai in 1 to van loop
+    if test_env=1 then
+    -- STIMULI FROM INTERNAL PRBS
+      test <= '0';
+      -- TEST MODE
       wait until falling_edge(xdk);
-      assert ( xd=std_logic_vector(to_unsigned(inc+ai,20)) ) report "ERROR: wrong data received: " &
-      integer'image(to_integer(unsigned(xd))) & "/=" & integer'image(inc+ai)
-      severity FAILURE;
-      --report integer'image(to_integer(unsigned(xd))) & "==" & integer'image(inc+ai);
-    end loop;
-    for bi in 1 to vbn loop
-      wait until falling_edge(xdk);
-      assert (xd=std_logic_vector(to_unsigned(inc+bi,20)) ) report "ERROR: wrong data received: " &
-      integer'image(to_integer(unsigned(xd))) & "==" & integer'image(inc+bi)
-      severity FAILURE;
-      --report integer'image(to_integer(unsigned(xd))) & "==" & integer'image(inc+bi);
-    end loop;
-    inc := inc+1;
+      if to_integer(unsigned(xd(xd'high downto xd'high-6))) < 48 then
+        a_data   <= xd(xd'high-8 downto 0);
+        a_valid  <= '1';
+        a_clk    <= '0';
+      else
+        b_data   <= xd(xd'high-8 downto 0);
+        b_valid  <= '1';
+        b_clk    <= '0';
+      end if;
+      while xeob_n_t/='0' loop
+        test <= '1';
+        wait until rising_edge(xdk_i);
+        a_valid  <= '1';
+        a_clk    <= '1';
+        b_valid  <= '1';
+        b_clk    <= '1';
+        wait until falling_edge(xdk);
+        if to_integer(unsigned(xd(xd'high downto xd'high-6))) < 48 then
+          a_data   <= xd(xd'high-8 downto 0);
+          a_valid  <= '1';
+          a_clk    <= '0';
+        else
+          b_data   <= xd(xd'high-8 downto 0);
+          b_valid  <= '1';
+          b_clk    <= '0';
+        end if;
+      end loop;
+      test <= '0';
+      wait until rising_edge(xdk_i);
+      a_valid  <= '1';
+      a_clk    <= '1';
+      b_valid  <= '1';
+      b_clk    <= '1';
+      inc := inc+1;
+    elsif test_env=2 then
+    --STIMULI FROM TB 
+      van := inc mod 9;
+      vbn := inc mod 7;
+      for ai in 1 to van loop
+        wait until falling_edge(xdk);
+        assert ( xd=std_logic_vector(to_unsigned(inc+ai,20)) ) report "ERROR: wrong data received: " &
+        integer'image(to_integer(unsigned(xd))) & "/=" & integer'image(inc+ai)
+        severity FAILURE;
+        --report integer'image(to_integer(unsigned(xd))) & "==" & integer'image(inc+ai);
+      end loop;
+      for bi in 1 to vbn loop
+        wait until falling_edge(xdk);
+        assert (xd=std_logic_vector(to_unsigned(inc+bi+48*(2**13),20)) ) report "ERROR: wrong data received: " &
+        integer'image(to_integer(unsigned(xd))) & "==" & integer'image(inc+bi)
+        severity FAILURE;
+        --report integer'image(to_integer(unsigned(xd))) & "==" & integer'image(inc+bi);
+      end loop;
+      inc := inc+1;
+    end if;
   end if;
 end process;
+--------------------
+-- PRBS_ANY: A DATA CHECK
+--------------------
+a_data_gen: PRBS_ANY 
+ GENERIC MAP(
+    INV_PATTERN => A_INV_PATTERN,
+    POLY_LENGHT => POLY_LENGHT,              
+    POLY_TAP    => POLY_TAP,
+    NBITS       => a_data'high+1
+ )
+ PORT MAP(
+  CHK_MODE      => '0',
+  RST           => rst,
+  CLK           => a_clk,
+  DATA_IN       => a_data,
+  EN            => a_valid,
+  DATA_OUT      => a_data_check
+);
+--------------------
+-- PRBS_ANY: B DATA CHECK
+--------------------
+b_data_gen: PRBS_ANY 
+ GENERIC MAP(
+    INV_PATTERN => B_INV_PATTERN,
+    POLY_LENGHT => POLY_LENGHT,              
+    POLY_TAP    => POLY_TAP,
+    NBITS       => b_data'high+1
+ )
+ PORT MAP(
+  CHK_MODE      => '0',
+  RST           => rst,
+  CLK           => b_clk,
+  DATA_IN       => b_data,
+  EN            => b_valid,
+  DATA_OUT      => b_data_check
+);
 --------------------
 -- AUXBUS STIMULI
 --------------------
@@ -274,12 +477,12 @@ process
   --    else
       founddata <= not xsds_inertial;
       wait for 5 ns;
-      assert not(xbk='0') report "ERROR: xbk asserted to '0' before xtrgv_n is released during trigger cycle with Trigger Number " & integer'image(trig_num) & "." severity ERROR;
+      assert not(xbk='0') report "ERROR: xbk asserted to '0' before xtrgv_n is released during trigger cycle with Trigger Number " & integer'image(trig_num) & "." severity FAILURE;
   --    end if;
     -- Trigger Bus Data is valide, Active LOW
     xtrgv_n       <= '1';
     -- Trigger Bus, first valid trigger is 001
-    xt            <= (others => 'Z');
+    xt            <= (others => '0');
   end sync_cycle;
   --------------------
   -- Sync Readout Cycle
@@ -287,7 +490,7 @@ process
   procedure sync_readout (target : std_logic_vector(3 downto 0); founddata : std_logic) is
   begin
     if founddata = '0' then
-      report "Error: xsds not asserted low during sync cycle." severity note;
+      report "Error: xsds not asserted low during sync cycle." severity FAILURE;
       return;
     end if;
     -- Address Bus
@@ -301,7 +504,7 @@ process
       xds           <= '0';
       wait until xdk = '0' for 1 us;
       if xdk /= '0' then
-        report "No response from target " & integer'image(to_integer(unsigned(target))) & "during Sync Readout Cycle " & "." severity WARNING;
+        report "No response from target " & integer'image(to_integer(unsigned(target))) & "during Sync Readout Cycle " & "." severity FAILURE;
         exit RO_loop;
       end if;
       rx_data <= xd_inertial;
@@ -310,7 +513,7 @@ process
       xds           <= '1';
       wait for 15 ns;
       exit RO_loop when xeob_n = '0';
-      report "xeob_n not asserted low during Sync Readout" & "." severity WARNING;
+      report "xeob_n not asserted low during Sync Readout" & "." severity FAILURE;
     end loop;
     wait for 5 ns;
     -- Address Bus is Valid
@@ -327,7 +530,7 @@ process
   procedure idle is
   begin
     -- Trigger Bus, first valid trigger is 001
-    xt            <= (others => 'Z');
+    xt            <= (others => '0');
     -- Trigger Bus Data is valide, Active LOW
     xtrgv_n       <= '1';
     -- Address Bus
@@ -364,12 +567,12 @@ process
 --    else
       founddata <= not xsds_inertial;
       wait for 5 ns;
-      assert not(xbk='0') report "ERROR: xbk asserted to '0' before xtrgv_n is released during trigger cycle with Trigger Number " & integer'image(trig_num) & "." severity ERROR;
+      assert not(xbk='0') report "ERROR: xbk asserted to '0' before xtrgv_n is released during trigger cycle with Trigger Number " & integer'image(trig_num) & "." severity FAILURE;
 --    end if;
     -- Trigger Bus Data is valide, Active LOW
     xtrgv_n       <= '1';
     -- Trigger Bus, first valid trigger is 001
-    xt            <= (others => 'Z');
+    xt            <= (others => '0');
   end trigger_cycle;
   --------------------
   -- Trigger Readout Cycle
@@ -377,7 +580,7 @@ process
   procedure trigger_readout (target : std_logic_vector(3 downto 0); trig_num : integer; founddata : std_logic) is
   begin
     if founddata = '0' then
-      report "No found data, exiting from readout cycle." severity note;
+      --report "No found data, exiting from readout cycle." severity note;
       return;
     end if;
     -- Address Bus
@@ -391,7 +594,7 @@ process
       xds           <= '0';
       wait until xdk = '0' for 1 us;
       if xdk /= '0' then
-        report "No response from target " & integer'image(to_integer(unsigned(target))) & "during Readout Cycle with Trigger Number " & integer'image(trig_num) & "." severity WARNING;
+        report "No response from target " & integer'image(to_integer(unsigned(target))) & "during Readout Cycle with Trigger Number " & integer'image(trig_num) & "." severity FAILURE;
         exit RO_loop;
       end if;
       rx_data <= xd_inertial;
@@ -416,17 +619,20 @@ begin
   if rstt='1' then
     wait until rstt = '0';
   end if;
+  if test_env=0 then
+    wait;
+  end if;
   wait for 100 ns;
   trig_num <= trig_num + 1;
   wait for tst;
-  report "Start AUX Trigger Cycle..." severity NOTE;
+  --report "Start AUX Trigger Cycle..." severity NOTE;
   trigger_cycle(trig_num);
-  report "Done." severity NOTE;
+  --report "Done." severity NOTE;
   wait for 150 ns;
   wait for tst;
-  report "Start AUX Trigger Readout Cycle..." severity NOTE;
+  --report "Start AUX Trigger Readout Cycle..." severity NOTE;
   trigger_readout(sa, trig_num, founddata);
-  report "Done." severity NOTE;
+  --report "Done." severity NOTE;
   --wait for 100 ns;
   --trig_num <= trig_num + 1;
   wait for 10 ns;
@@ -454,20 +660,29 @@ begin
   curr_time := now;
   wait until xbk = 'Z';
   time_diff := now - curr_time;
-  report "--------- - - 35ns -> " & time'image(time_diff) severity NOTE;
+  --report "--------- - - 35ns -> " & time'image(time_diff) severity NOTE;
   assert time_diff >= 35 ns report "TRIGGER TIMING ERROR." severity FAILURE;
 end process;
 -- readout (15 ns)
 process
   variable time_diff : time;
   variable curr_time : time;
+  variable xd_temp   : std_logic_vector(19 DOWNTO 0);
 begin
   wait until falling_edge(xds);
   wait until xd'event;
+  xd_temp := xd;
   curr_time := now;
-  wait until falling_edge(xdk);
+  loop ---------- Note: The most of the times (not always) there is a second event in xd.
+    wait until falling_edge(xdk) or xd'event;
+    if xd_temp = xd then
+      exit;
+    end if;
+    xd_temp := xd;
+    curr_time := now;
+  end loop;
   time_diff := now - curr_time;
-  report "--------- - - 15ns -> " & time'image(time_diff) severity NOTE;
+  --report "--------- - - 15ns -> " & time'image(time_diff) severity NOTE;
   assert time_diff >= 15 ns report "READOUT TIMING ERROR." severity FAILURE;
 end process;
 --------------------
@@ -506,6 +721,9 @@ begin
     wait until rstt = '0';
   end if;
   wait for 40 ns;
+  if test_env/=2 then
+    wait;
+  end if;
   wait until clk'event and clk='1';
   wait for clk_period/5;
   van  := inc mod 9;
@@ -618,6 +836,24 @@ begin
   end loop;
 end process;
 --------------------
+-- TRIGGER PROCESS
+--------------------
+tr_pr: process
+begin
+  trigger <= '0';
+  wait for clk_period*1;
+  if rst = '1' then
+    wait until rst='0';
+  end if;
+  wait for clk_period*50;
+  wait until clk'event and clk='1';
+  wait for clk_period/5;
+  if xsyncrd_n='1' then
+    trigger <= '1';
+  end if;
+  wait for clk_period*10;
+end process;
+--------------------
 -- CLK GEN
 --------------------
 process begin
@@ -680,6 +916,13 @@ Port Map(
   clk2x          => clk2x,
   -- System reset
   rst            => rst,
+  -------- Trigger  Signals -------
+  -- Local Input Trigger
+  trig_in       => trigger,
+  -- A Input Trigger
+  atrig_det     => '0',
+  -- B Input Trigger
+  btrig_det     => '0',
   -------- A FIFO Interface -------
   A_Wr_clk      => A_Wr_clk,
   A_Din         => A_Din,
@@ -692,6 +935,28 @@ Port Map(
   B_Wr_en       => B_Wr_en,
   B_Full        => B_Full,
   B_Almost_full => B_Almost_full,
+  --------   AXI-4  PORTS   -------
+  S_AXI_ACLK    => S_AXI_ACLK,
+  S_AXI_ARESETN => S_AXI_ARESETN,
+  S_AXI_AWADDR  => S_AXI_AWADDR,
+  S_AXI_AWPROT  => S_AXI_AWPROT,
+  S_AXI_AWVALID => S_AXI_AWVALID,
+  S_AXI_AWREADY => S_AXI_AWREADY,
+  S_AXI_WDATA   => S_AXI_WDATA,
+  S_AXI_WSTRB   => S_AXI_WSTRB,
+  S_AXI_WVALID  => S_AXI_WVALID,
+  S_AXI_WREADY  => S_AXI_WREADY,
+  S_AXI_BRESP   => S_AXI_BRESP,
+  S_AXI_BVALID  => S_AXI_BVALID,
+  S_AXI_BREADY  => S_AXI_BREADY,
+  S_AXI_ARADDR  => S_AXI_ARADDR,
+  S_AXI_ARPROT  => S_AXI_ARPROT,
+  S_AXI_ARVALID => S_AXI_ARVALID,
+  S_AXI_ARREADY => S_AXI_ARREADY,
+  S_AXI_RDATA   => S_AXI_RDATA,
+  S_AXI_RRESP   => S_AXI_RRESP,
+  S_AXI_RVALID  => S_AXI_RVALID,
+  S_AXI_RREADY  => S_AXI_RREADY,
   -------- ROCK OUTPUT -------
   -- Trigger Bus, first valid trigger is 001
   xt            => xt,
@@ -732,5 +997,174 @@ Port Map(
   -- Slave Geographical Address
   sa            => sa
 );
+--------------------
+-- AXI-4 LITE
+--------------------
+-- Global Signals
+S_AXI_ACLK    <= clk;
+S_AXI_ARESETN <= not rst;
+axi_pr: process
+  constant ADDR_LSB          : integer := (C_S_AXI_DATA_WIDTH/32)+ 1;
+  constant OPT_MEM_ADDR_BITS : integer := 6;
+  --------------------
+  -- AXI Idle
+  --------------------
+  procedure axi_idle is
+  begin
+    wait until falling_edge(S_AXI_ACLK);
+    -- Address Write Channel
+    S_AXI_AWADDR  <= "000000000";
+    S_AXI_AWPROT  <= "000";
+    S_AXI_AWVALID <= '0';
+    -- Data Write Channel
+    S_AXI_WDATA   <= x"0000_0000";
+    S_AXI_WSTRB   <= x"0";
+    S_AXI_WVALID  <= '0';
+    -- Write Response Channel
+    S_AXI_BREADY  <= '0';
+    -- Address Read Channel
+    S_AXI_ARADDR  <= "000000000";
+    S_AXI_ARPROT  <= "000";
+    S_AXI_ARVALID <= '0';
+    -- Data Read Channel
+    S_AXI_RREADY  <= '0';
+    wait until rising_edge(S_AXI_ACLK);
+  end procedure;
+  --------------------
+  -- AXI Read
+  --------------------
+  --procedure axi_read (Address: std_logic_vector(C_S_AXI_ADDR_WIDTH-1 downto 0) ) is
+  procedure axi_read (Address: integer ) is
+  begin
+    wait until rising_edge(S_AXI_ACLK);
+    -- Set Read Address
+    S_AXI_ARADDR <= std_logic_vector(to_unsigned(Address, OPT_MEM_ADDR_BITS+1)) & std_logic_vector(to_unsigned(0, ADDR_LSB));
+    -- Assert Read Address Valid
+    S_AXI_ARVALID <= '1';
+    wait until S_AXI_ARREADY='1';
+    wait until rising_edge(S_AXI_ACLK); 
+    -- Read Address Channel Done
+    S_AXI_ARVALID <= '0';
+    -- Ready to read data
+    S_AXI_RREADY <= '1';
+    -- Wait for read valid data
+    wait until S_AXI_RVALID='1';
+    wait until rising_edge(S_AXI_ACLK);
+    -- Check read response is successful
+    if (S_AXI_RRESP = "00") then
+      axi_rx_data <= S_AXI_RDATA;
+      axi_rx_dv   <= '1';
+    else
+      axi_rx_data <= x"FF00_00FF";
+    end if;
+    -- Read Data Channel Done 
+    S_AXI_RREADY <= '0';
+    wait until rising_edge(S_AXI_ACLK);
+    axi_rx_dv   <= '0';
+  end procedure;
+  --------------------
+  -- AXI Write
+  --------------------
+  --procedure axi_write (Address: std_logic_vector(C_S_AXI_ADDR_WIDTH-1 downto 0); Data: STD_LOGIC_VECTOR (C_S_AXI_DATA_WIDTH-1 downto 0) ) is
+  procedure axi_write (Address: integer; Data: integer ) is
+    constant timeout      : integer   := 8;
+    variable timeout_cnt  : integer   := 0;
+    variable awready_flag : std_logic := '0';
+    variable wready_flag  : std_logic := '0';
+  begin
+    wait until rising_edge(S_AXI_ACLK);
+    -- Ready to accept BRESP
+    S_AXI_BREADY <= '1';
+    -- Set Write Address
+    S_AXI_AWADDR <= std_logic_vector(to_unsigned(Address, OPT_MEM_ADDR_BITS+1)) & std_logic_vector(to_unsigned(0, ADDR_LSB));
+    -- Assert Write Address Valid
+    S_AXI_AWVALID <= '1';
+    -- Set Write Data
+    S_AXI_WDATA <= std_logic_vector(to_unsigned(Data, C_S_AXI_DATA_WIDTH));
+    -- Assert Write Data Valid
+    S_AXI_WVALID <= '1';
+    -- Write Enable for All Bytes
+    S_AXI_WSTRB <= (others => '1');
+    while (awready_flag /= '1' or wready_flag /= '1') and (timeout_cnt /= timeout) loop
+      wait until rising_edge(S_AXI_ACLK); 
+      if (S_AXI_AWREADY='1') then
+        S_AXI_AWVALID <= '0';
+        awready_flag  := '1';
+      end if;
+      if (S_AXI_WREADY='1') then
+        S_AXI_WVALID <= '0';
+        wready_flag  := '1';
+      end if;
+      timeout_cnt := timeout_cnt + 1;
+    end loop;
+    S_AXI_AWVALID <= '0';
+    S_AXI_WVALID <= '0';
+    if S_AXI_BVALID/='1' then
+      wait until S_AXI_BVALID='1';
+    end if;
+    assert (S_AXI_BRESP = "00") report " ------  ERROR: WRITE PROCESS FAILED." severity FAILURE;
+    wait until rising_edge(S_AXI_ACLK);
+    S_AXI_BREADY <= '0';
+  end procedure;
+  
+begin
+  wait until S_AXI_ARESETN = '1';
+  axi_idle;
+  wait until rising_edge(S_AXI_ACLK);
+  -- Reset AUX BUS
+  axi_write(0, 1);
+  report "-- Write 1 @ Reg 0 (Reset AUX):";
+  -- Read Reg 0
+  axi_read(0);
+  report "   Read Reg 0: " & integer'image(to_integer(unsigned(axi_rx_data)));
+  if test_env=1 then
+    -- Enable AUXBUS Test Mode.
+    axi_write(1, 3);
+    -- Run AUX.
+    axi_write(0, 0);
+    wait;
+  elsif test_env=2 then
+    -- Leave default configuration.
+    -- Run AUX.
+    axi_write(0, 0);
+    wait;
+  end if;
+  -- Enable AXI FIFO READ and WRITE
+  axi_write(2, 3+48);
+  report "-- Write 27 @ Reg 2 (Enable AXI FIFO READ and WRITE):";
+  -- Read Reg 2
+  axi_read(2);
+  report "   Read Reg 2: " & integer'image(to_integer(unsigned(axi_rx_data)));
+  -- AUX run
+  report "-- Write 0 @ Reg 0 (Run AUX).";
+  axi_write(0, 0);
+  -- Write 1:3 in A FIFO
+  report "-- Write 1024+[1:3] @ FIFO A:";
+  axi_write(3, 1024+3);
+  axi_write(3, 1024+4);
+  axi_write(3, 1024+5);
+  -- Read 1:3 from A FIFO
+  report "   Read FIFO A:";
+  axi_read(35);
+  report "                  " & integer'image(to_integer(unsigned(axi_rx_data)));
+  axi_read(35);
+  report "                  " & integer'image(to_integer(unsigned(axi_rx_data)));
+  axi_read(35);
+  report "                  " & integer'image(to_integer(unsigned(axi_rx_data)));
+  -- Write 1:3 in B FIFO
+  report "-- Write 2048+[1:3] @ FIFO B:";
+  axi_write(4, 2048+3);
+  axi_write(4, 2048+4);
+  axi_write(4, 2048+5);
+  -- Read 1:3 from B FIFO
+  report "   Read FIFO B:";
+  axi_read(36);
+  report "                  " & integer'image(to_integer(unsigned(axi_rx_data)));
+  axi_read(36);
+  report "                  " & integer'image(to_integer(unsigned(axi_rx_data)));
+  axi_read(36);
+  report "                  " & integer'image(to_integer(unsigned(axi_rx_data)));
+  wait;
+end process;
 
 end a;
