@@ -317,6 +317,8 @@ Port (
   -- Slave is full, Active LOW
   xbusy_n       : out STD_LOGIC;
   -------- ROCK TRISTATE INPUT -------
+  -- Slave Enable Tristate (Active Low)
+  xsel_n        : out STD_LOGIC;
   -- Slave data is valid, Active LOW
   -- Slave recognized Master finished cycle, Active HIGH
   xdk           : out STD_LOGIC;
@@ -329,7 +331,15 @@ Port (
   xsds          : out STD_LOGIC;
   -------- BACKPLANE HARDWIRED INPUT -------
   -- Slave Geographical Address
-  sa            : in STD_LOGIC_VECTOR (3 downto 0)
+  sa            : in STD_LOGIC_VECTOR (3 downto 0);
+  -------- EXTERNAL DEVICE SELECTION -------
+  -- Use external Device Selection, Active HIGH
+  ext_s_en      : in STD_LOGIC;
+  -- External Device selection , Active HIGH
+  x_ssel        : in STD_LOGIC;
+  -------- AUX BUS ENABLE -------
+  -- Enable AUXBUS
+  AUX_Enable    : in STD_LOGIC
 );
 end auxbus;
 
@@ -525,6 +535,8 @@ Port (
   -- Slave is full, Active LOW
   xbusy_n : out STD_LOGIC;
   -------- ROCK TRISTATE INPUT -------
+  -- Slave Enable Tristate (Active Low)
+  xsel_n        : out STD_LOGIC;
   -- Slave data is valid, Active LOW
   -- Slave recognized Master finished cycle, Active HIGH
   xdk : out STD_LOGIC;
@@ -537,7 +549,12 @@ Port (
   xsds : out STD_LOGIC;
   -------- BACKPLANE HARDWIRED INPUT -------
   -- Slave Geographical Address
-  sa : in STD_LOGIC_VECTOR (3 downto 0)
+  sa : in STD_LOGIC_VECTOR (3 downto 0);
+  -------- EXTERNAL DEVICE SELECTION -------
+  -- Use external Device Selection, Active HIGH
+  ext_s_en      : in STD_LOGIC;
+  -- External Device selection , Active HIGH
+  x_ssel        : in STD_LOGIC
 );
 end component;
 --------------------
@@ -894,7 +911,7 @@ B_Wr_en_i     <= rw_reg.B_write_en   when rw_reg.B_FIFO_write_en = '1' else
 --------------------
 -- xCTRL
 --------------------
-xctrl_reset <= rst or rw_reg.reset;
+xctrl_reset <= rst or rw_reg.reset or not AUX_Enable;
 xctrl_inst: xctrl
 Port Map(
   clk           => clk,
@@ -924,7 +941,7 @@ Port Map(
 --------------------
 -- xFRONT
 --------------------
-xfront_reset <= rst or rw_reg.reset;
+xfront_reset <= rst or rw_reg.reset or not AUX_Enable;
 full         <= apfull or bpfull;
 xfront_inst: xfront
 Generic Map(
@@ -984,6 +1001,8 @@ Port Map(
   -- Slave is full, Active LOW
   xbusy_n       => xbusy_n,
   -------- ROCK TRISTATE INPUT -------
+  -- Slave Enable Tristate (Active Low)
+  xsel_n        <= xsel_n,
   -- Slave data is valid, Active LOW
   -- Slave recognized Master finished cycle, Active HIGH
   xdk           => xdk,
@@ -996,7 +1015,12 @@ Port Map(
   xsds          => xsds,
   -------- BACKPLANE HARDWIRED INPUT -------
   -- Slave Geographical Address
-  sa            => sa
+  sa            => sa,
+  -------- EXTERNAL DEVICE SELECTION -------
+  -- Use external Device Selection, Active HIGH
+  ext_s_en      <= ext_s_en,
+  -- External Device selection , Active HIGH
+  x_ssel        <= x_ssel
 );
 --------------------
 -- xAXI
@@ -2169,7 +2193,7 @@ begin
     b_header_r <= b_header;
     x_hdr_d_r  <= x_hdr_d;
     x_d_r      <= x_d;
-    pstate <= nstate;
+    pstate     <= nstate;
   end if;
 end process;  
 
@@ -2183,9 +2207,9 @@ begin
   x_d      <= x_d_r;
   x_dv     <= '0';
   x_last   <= '0';
-  x_nodata  <= '0';
-  x_hdr_d    <= x_hdr_d_r;
-  x_hdr_dv   <= '0';
+  x_nodata <= '0';
+  x_hdr_d  <= x_hdr_d_r;
+  x_hdr_dv <= '0';
   x_mmatch <= '0';
   case pstate is
   when RESET_STATE =>
@@ -2277,7 +2301,7 @@ begin
       x_last   <= '1';
     end if;
   when SEND_ABDATA =>
-    x_hdr_dv   <= '1';
+    x_hdr_dv <= '1';
     a_rd_en  <= x_rd_en;
     b_rd_en  <= '0';
     x_dv     <= a_dv;
@@ -2294,7 +2318,7 @@ begin
       end if;
     end if;
   when SEND_B_DATA =>
-    x_hdr_dv   <= '1';
+    x_hdr_dv <= '1';
     b_rd_en  <= x_rd_en;
     a_rd_en  <= '0';
     x_dv     <= b_dv;
@@ -2311,7 +2335,7 @@ begin
       x_last   <= '1';
     end if;
   when NOFOUNDDATA => 
-    x_hdr_dv   <= '1';
+    x_hdr_dv  <= '1';
     x_nodata  <= '1';
     nstate <= NOFOUNDDATA;
     if x_rd_en = '1' then
@@ -2338,7 +2362,7 @@ begin
     a_rd_en  <= '0';
     b_rd_en  <= '0';
   when others =>
-    nstate   <= "XXX";
+    nstate   <= RESET_STATE;
     a_rd_en  <= '0';
     b_rd_en  <= '0';
   end case;
@@ -2434,6 +2458,8 @@ Port (
   -- Slave is full, Active LOW
   xbusy_n : out STD_LOGIC;
   -------- ROCK TRISTATE INPUT -------
+  -- Slave Enable Tristate (Active Low)
+  xsel_n        : out STD_LOGIC;
   -- Slave data is valid, Active LOW
   -- Slave recognized Master finished cycle, Active HIGH
   xdk : out STD_LOGIC;
@@ -2446,42 +2472,17 @@ Port (
   xsds : out STD_LOGIC;
   -------- BACKPLANE HARDWIRED INPUT -------
   -- Slave Geographical Address
-  sa : in STD_LOGIC_VECTOR (3 downto 0)
+  sa : in STD_LOGIC_VECTOR (3 downto 0);
+  -------- EXTERNAL DEVICE SELECTION -------
+  -- Use external Device Selection, Active HIGH
+  ext_s_en      : in STD_LOGIC;
+  -- External Device selection , Active HIGH
+  x_ssel        : in STD_LOGIC
 );
 end xfront;
 
 architecture rtl of xfront is
-------------------------------------------------------------------
----- COMPONENTS ----
-------------------------------------------------------------------
---------------------
--- IBUFV
---------------------
-component IBUFV is
-generic (
-  WIDTH        : integer; 
-  IBUF_LOW_PWR : BOOLEAN;
-  IOSTANDARD   : STRING);
-port (
-  O            : out STD_LOGIC_VECTOR (WIDTH-1 downto 0);
-  I            : in  STD_LOGIC_VECTOR (WIDTH-1 downto 0)
-);
-end component IBUFV;
---------------------
--- OBUFTV
---------------------
-component OBUFTV is
-generic (
-  WIDTH        : integer; 
-  DRIVE        : integer;
-  IOSTANDARD   : STRING;
-  SLEW         : STRING);
-port (
-  O            : out STD_LOGIC_VECTOR (WIDTH-1 downto 0);
-  I            : in  STD_LOGIC_VECTOR (WIDTH-1 downto 0);
-  T            : in  STD_LOGIC
-);
-end component OBUFTV;
+
 ------------------------------------------------------------------
 ---- CONSTANTS ----
 ------------------------------------------------------------------
@@ -2526,167 +2527,62 @@ signal cns					        : cstate;
 -- AUXBUS INPUT SYNCRONIZATION
 attribute async_reg : STRING;
 -- Trigger Bus, first valid trigger is 001
-signal bt         : STD_LOGIC_VECTOR (11 downto 0);
 signal it         : STD_LOGIC_VECTOR (11 downto 0);
 signal mt         : STD_LOGIC_VECTOR (11 downto 0);
 attribute async_reg of it : signal is "TRUE";
 attribute async_reg of mt : signal is "TRUE";
 -- Trigger Bus Data is valide, Active LOW
-signal btrgv_n    : STD_LOGIC;
 signal itrgv_n    : STD_LOGIC;
 signal mtrgv_n    : STD_LOGIC;
 attribute async_reg of itrgv_n : signal is "TRUE";
 attribute async_reg of mtrgv_n : signal is "TRUE";
 -- Address Bus
-signal ba         : STD_LOGIC_VECTOR (3 downto 0);
 signal ia         : STD_LOGIC_VECTOR (3 downto 0);
 signal ma         : STD_LOGIC_VECTOR (3 downto 0);
 attribute async_reg of ia : signal is "TRUE";
 attribute async_reg of ma : signal is "TRUE";
 -- Address Bus is Valid
-signal bas_n      : STD_LOGIC;
 signal ias_n      : STD_LOGIC;
 signal mas_n      : STD_LOGIC;
 attribute async_reg of ias_n : signal is "TRUE";
 attribute async_reg of mas_n : signal is "TRUE";
 -- ROCK ready to read from slave, Active LOW
 -- ROCK finished to read from slave, Active HIGH
-signal bds        : STD_LOGIC;
 signal ids        : STD_LOGIC;
 signal mds        : STD_LOGIC;
 attribute async_reg of ids : signal is "TRUE";
 attribute async_reg of mds : signal is "TRUE";
 -- Master is initiating a synch check, Active LOW
-signal bsyncrd_n  : STD_LOGIC;
 signal isyncrd_n  : STD_LOGIC;
 signal msyncrd_n  : STD_LOGIC;
 attribute async_reg of isyncrd_n : signal is "TRUE";
 attribute async_reg of msyncrd_n : signal is "TRUE";
 -- ROCK send a system HALT due to Error,
-signal bsyshalt   : STD_LOGIC;
 signal isyshalt   : STD_LOGIC;
 signal msyshalt   : STD_LOGIC;
 attribute async_reg of isyshalt : signal is "TRUE";
 attribute async_reg of msyshalt : signal is "TRUE";
 -- ROCK produces a create level AUX reset
-signal bsysreset  : STD_LOGIC;
 signal isysreset  : STD_LOGIC;
 signal msysreset  : STD_LOGIC;
 attribute async_reg of isysreset : signal is "TRUE";
 attribute async_reg of msysreset : signal is "TRUE";
 -------- BACKPLANE HARDWIRED INPUT -------
 -- Slave Geographical Address
-signal bsa         : STD_LOGIC_VECTOR (3 downto 0);
 signal isa         : STD_LOGIC_VECTOR (3 downto 0);
 signal msa         : STD_LOGIC_VECTOR (3 downto 0);
 attribute async_reg of isa : signal is "TRUE";
 attribute async_reg of msa : signal is "TRUE";
-  
--- Example Tristate Output Enable
-signal tris_en              : std_logic;
-signal tris_out             : std_logic; 
--------- ROCK OPEN COLLECOTR INPUT -------
--- Slave xsds bit is valid, Active HIGH
-signal obk                  : std_logic;
--- Slave has an error, Active LOW
-signal oberr_n              : std_logic;
--- Slave is full, Active LOW
-signal obusy_n              : std_logic;
--------- TRISTATE OUTPUT AND ENABLE SIGNALS -------
--- Slave data is valid, Active LOW
--- Slave recognized Master finished cycle, Active HIGH
-signal odk                  : std_logic;
-signal odk_en               : std_logic;
--- Actual Slave Data Word is the last, Active LOW
-signal oeob_n               : std_logic;
-signal oeob_en              : std_logic;
--- Slave Data (19 downto 0)
-signal od                   : std_logic_vector(xd'range);
-signal od_en                : std_logic;
--- Slave has data for a given Trigger Number
--- Can be either tristate or always enabled
-signal osds                 : std_logic;
-signal osds_en              : std_logic;
+-------- EXTERNAL DEVICE SELECTION -------
+signal i_ssel      : STD_LOGIC;
+signal m_ssel      : STD_LOGIC_VECTOR (3 downto 0);
+attribute async_reg of i_ssel : signal is "TRUE";
+attribute async_reg of m_ssel : signal is "TRUE";
+-- Tristate Output Enable (Active High)
+signal tris_en     : std_logic;
 
 begin
-
--------- INPUT -------
--- Input Buffers
-ibuf_xt: IBUFV
-generic map (
-   WIDTH => xt'high+1,
-   IBUF_LOW_PWR => TRUE, -- Low power (TRUE) vs. performance (FALSE) setting for referenced I/O standards
-   IOSTANDARD => "DEFAULT")
-port map (
-   O => bt,
-   I => xt
-);
-ibuf_btrgv_n: IBUF
-generic map (
-   IBUF_LOW_PWR => TRUE, -- Low power (TRUE) vs. performance (FALSE) setting for referenced I/O standards
-   IOSTANDARD => "DEFAULT")
-port map (
-   O => btrgv_n,
-   I => xtrgv_n
-);
-ibuf_ba: IBUFV
-generic map (
-   WIDTH => xa'high+1,
-   IBUF_LOW_PWR => TRUE, -- Low power (TRUE) vs. performance (FALSE) setting for referenced I/O standards
-   IOSTANDARD => "DEFAULT")
-port map (
-   O => ba,
-   I => xa
-);
-ibuf_bas_n: IBUF
-generic map (
-   IBUF_LOW_PWR => TRUE, -- Low power (TRUE) vs. performance (FALSE) setting for referenced I/O standards
-   IOSTANDARD => "DEFAULT")
-port map (
-   O => bas_n,
-   I => xas_n
-);
-ibuf_bds: IBUF
-generic map (
-   IBUF_LOW_PWR => TRUE, -- Low power (TRUE) vs. performance (FALSE) setting for referenced I/O standards
-   IOSTANDARD => "DEFAULT")
-port map (
-   O => bds,
-   I => xds
-);
-ibuf_bsyncrd_n: IBUF
-generic map (
-   IBUF_LOW_PWR => TRUE, -- Low power (TRUE) vs. performance (FALSE) setting for referenced I/O standards
-   IOSTANDARD => "DEFAULT")
-port map (
-   O => bsyncrd_n,
-   I => xsyncrd_n
-);
-ibuf_bsyshalt: IBUF
-generic map (
-   IBUF_LOW_PWR => TRUE, -- Low power (TRUE) vs. performance (FALSE) setting for referenced I/O standards
-   IOSTANDARD => "DEFAULT")
-port map (
-   O => bsyshalt,
-   I => xsyshalt
-);
-ibuf_bsysreset: IBUF
-generic map (
-   IBUF_LOW_PWR => TRUE, -- Low power (TRUE) vs. performance (FALSE) setting for referenced I/O standards
-   IOSTANDARD => "DEFAULT")
-port map (
-   O => bsysreset,
-   I => xsysreset
-);
-ibuf_bsa: IBUFV
-generic map (
-   WIDTH => sa'high+1,
-   IBUF_LOW_PWR => TRUE, -- Low power (TRUE) vs. performance (FALSE) setting for referenced I/O standards
-   IOSTANDARD => "DEFAULT")
-port map (
-   O => bsa,
-   I => sa
-);
+  
 -- Input Synchronisation
 insync_pr: process (rst, clk, clk2x) is
 begin
@@ -2722,25 +2618,29 @@ begin
   else
     if clk2x'event and clk2x='1' then
       -- Trigger Bus, first valid trigger is 001
-      mt         <= bt;
+      mt         <= xt;
       -- Trigger Bus Data is valide, Active LOW
-      mtrgv_n    <= btrgv_n;
+      mtrgv_n    <= xtrgv_n;
       -- Address Bus
-      ma         <= ba;
+      ma         <= xa;
       -- Address Bus is Valid
-      mas_n      <= bas_n;
+      mas_n      <= xas_n;
       -- ROCK ready to read from slave, Active LOW
       -- ROCK finished to read from slave, Active HIGH
-      mds        <= bds;
+      mds        <= xds;
       -- Master is initiating a synch check, Active LOW
-      msyncrd_n  <= bsyncrd_n;
+      msyncrd_n  <= xsyncrd_n;
       -- ROCK send a system HALT due to Error,
-      msyshalt   <= bsyshalt;
+      msyshalt   <= xsyshalt;
       -- ROCK produces a create level AUX reset
-      msysreset  <= bsysreset;
+      msysreset  <= xsysreset;
       -------- BACKPLANE HARDWIRED INPUT -------
       -- Slave Geographical Address
-      msa        <= bsa;
+      msa        <= sa;
+      -------- EXTERNAL DEVICE SELECTION -------
+      -- External Device selection , Active HIGH
+      m_ssel     <= x_ssel;
+      ------------------------
       -- Trigger Bus, first valid trigger is 001
       it         <= mt;
       -- Trigger Bus Data is valide, Active LOW
@@ -2761,12 +2661,17 @@ begin
       -------- BACKPLANE HARDWIRED INPUT -------
       -- Slave Geographical Address
       isa        <= msa;
+      -------- EXTERNAL DEVICE SELECTION -------
+      -- External Device selection , Active HIGH
+      i_ssel     <= m_ssel;
     end if;
   end if;
 end process;
 
 -- Slave Address Selection
-ssel <= and_reduce (ia xnor isa);
+ssel <= '0'    when rst='1'        else 
+        i_ssel when ext_s_en = '1' else 
+        and_reduce (ia xnor isa);
 
 --Signal registering
 sig_reg_p: process(clk, rst) is
@@ -2777,11 +2682,10 @@ begin
     full_r <= full;
   end if;
 end process;
+-- Slave is busy
 full    <= i_full or full_r;
 -- Slave has an error, Active LOW
 oberr_n <= not i_mmatch;
--- Slave is full, Active LOW
---obusy_n <= not full;
 
 -------- COUNTER -------
 -- Counter Seq. Network
@@ -2932,20 +2836,18 @@ begin
     -- Slave is full, Active LOW
     obusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
+    -- Slave Enable Tristate (Active Low)
+    tris_en <= '1';
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
     odk <= '1';
-    odk_en <= '1';
     -- Actual Slave Data Word is the last, Active LOW
     oeob_n <= '1';
-    oeob_en <= '1';
     -- Slave Data (19 downto 0)
     od <= (others => '0');
-    od_en <= '1';
     -- Slave has data for a given Trigger Number
     -- Can be either tristate or always enabled
     osds <= '0';
-    osds_en <= '1';
   when trig =>
     -- Timing
     cvalue <= std_logic_vector(to_unsigned(thold35, Ncnt));
@@ -2962,7 +2864,7 @@ begin
     -- Slave has data for a given Trigger Number
     -- Can be either tristate or always enabled
     osds <= i_nodata and isyncrd_n;
-    osds_en <= '0';
+    --osds_en <= '0';
     -- Slave xsds bit is valid, Active HIGH
     obk <= '0';   
     if cvalid ='1' then
@@ -2977,16 +2879,15 @@ begin
     -- Slave is full, Active LOW
     obusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
+    -- Slave Enable Tristate (Active Low)
+    tris_en <= '1';
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
     odk <= '1';
-    odk_en <= '1';
     -- Actual Slave Data Word is the last, Active LOW
     oeob_n <= '1';
-    oeob_en <= '1';
     -- Slave Data (19 downto 0)
     od <= (others => '0');
-    od_en <= '1';
   when readout =>
     -- Timing
     cvalue <= (others => '0');
@@ -3000,26 +2901,23 @@ begin
     -- Slave is full, Active LOW
     obusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
+    -- Slave Enable Tristate (Active Low)
+    tris_en <= '0';
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
     odk <= '1';
-    odk_en <= '1';
     -- Actual Slave Data Word is the last, Active LOW
     oeob_n <= '1';
-    oeob_en <= '1';
     -- Slave Data (19 downto 0)
     od <= (others => '0');
-    od_en <= '1';
     -- Slave has data for a given Trigger Number
     -- Can be either tristate or always enabled
     osds <= '0';
-    osds_en <= '1';
     -------- START DATA READOUT -------
     first_word_flag <= first_word_flag_r;
     if (ssel = '1') and ias_n = '0' then
-      od_en <= '0';
-      odk_en <= '0';
-      oeob_en <= '0';
+      -- Slave Enable Tristate (Active Low)
+      tris_en <= '1';
       if (ids = '0') or (i_last = '1') then
         first_word_flag <= first_word_flag_r or '1';
         -- Set valid data in xd
@@ -3060,26 +2958,23 @@ begin
     -- Slave is full, Active LOW
     obusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
+    -- Slave Enable Tristate (Active Low)
+    tris_en <= '0';
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
     odk <= '1';
-    odk_en <= '1';
     -- Actual Slave Data Word is the last, Active LOW
     oeob_n <= '1';
-    oeob_en <= '1';
     -- Slave Data (19 downto 0)
     od <= (others => '0');
-    od_en <= '1';
     -- Slave has data for a given Trigger Number
     -- Can be either tristate or always enabled
     osds <= '0';
-    osds_en <= '1';
     -------- START SYNC READOUT -------
     first_word_flag <= first_word_flag_r;
     if (ssel = '1') and ias_n = '0' then
-      od_en <= '0';
-      odk_en <= '0';
-      oeob_en <= '0';
+      -- Slave Enable Tristate (Active Low)
+      tris_en <= '1';
       first_word_flag <= first_word_flag_r or '1';
       -- Set valid data in xd
       -- Slave Data (19 downto 0)
@@ -3122,197 +3017,15 @@ ts_enable_pr: process(ias_n, tris_en, ssel) is
 begin
   if (ias_n = '0') and (ssel = '1') then
     -- Output depends on the protocol
-    tris_out <= tris_en;
+    xsel_n <= not tris_en;
   else
     -- Output is disabled
-    tris_out <= '0';
+    xsel_n <= '1';
   end if;
 end process;
 
---Output Buffers
--------- ROCK OPEN COLLECOTR INPUT -------
-OBUFT_xbk : OBUFT
-generic map (
-   DRIVE => 12,
-   IOSTANDARD => "DEFAULT",
-   SLEW => "SLOW")
-port map (
-   O => xbk,
-   I => '0',
-   T => obk
-);
-OBUFT_xberr_n : OBUFT
-generic map (
-   DRIVE => 12,
-   IOSTANDARD => "DEFAULT",
-   SLEW => "SLOW")
-port map (
-   O => xberr_n,
-   I => '0',
-   T => oberr_n
-);
-OBUFT_xbusy_n : OBUFT
-generic map (
-   DRIVE => 12,
-   IOSTANDARD => "DEFAULT",
-   SLEW => "SLOW")
-port map (
-   O => xbusy_n,
-   I => '0',
-   T => obusy_n
-);
--------- ROCK TRISTATE INPUT -------
-OBUFT_xdk : OBUFT
-generic map (
-   DRIVE => 12,
-   IOSTANDARD => "DEFAULT",
-   SLEW => "SLOW")
-port map (
-   O => xdk,
-   I => odk,
-   T => odk_en
-);
-OBUFT_xeob_n : OBUFT
-generic map (
-   DRIVE => 12,
-   IOSTANDARD => "DEFAULT",
-   SLEW => "SLOW")
-port map (
-   O => xeob_n,
-   I => oeob_n,
-   T => oeob_en
-);
-OBUFT_xd : OBUFTV
-generic map (
-   WIDTH => xd'high+1,
-   DRIVE => 12,
-   IOSTANDARD => "DEFAULT",
-   SLEW => "SLOW")
-port map (
-   O => xd,
-   I => od,
-   T => od_en
-);
-OBUFT_xsds : OBUFT
-generic map (
-   DRIVE => 12,
-   IOSTANDARD => "DEFAULT",
-   SLEW => "SLOW")
-port map (
-   O => xsds,
-   I => osds,
-   T => osds_en
-);
-
 end rtl;
 
-
-----------------------------------------------------------------------------------
--- Company: LNF - INFN
--- Authors: Albicocco Pietro
--- Contact: pietro.albicocco@lnf.infn.it
-----------------------------------------------------------------------------------
--- File Name: IBUFV.vhd
--- Target Devices: Xilinx - 7 Series
--- Tool Versions: VIVADO 2015.4
--- Description: IBUFV extents the IBUF primitive to std_logic_vectors.
--- 
--- Dependencies: 
---
-----------------------------------------------------------------------------------
--- Revision History:
--- Revision 1.0 - 02/2016 - Albicocco P. - First Version
-----------------------------------------------------------------------------------
--- Additional Comments:
--- 
-----------------------------------------------------------------------------------
-library IEEE;
-use IEEE.STD_LOGIC_1164.ALL;
-use IEEE.NUMERIC_STD.ALL;
-
-library UNISIM;
-use UNISIM.VComponents.all;
-
-entity IBUFV is
-generic (
-  WIDTH        : integer; 
-  IBUF_LOW_PWR : BOOLEAN;
-  IOSTANDARD   : STRING);
-port (
-  O            : out STD_LOGIC_VECTOR (WIDTH-1 downto 0);
-  I            : in  STD_LOGIC_VECTOR (WIDTH-1 downto 0)
-);
-end IBUFV;
-
-architecture rtl of IBUFV is
-begin
-gen: for index in I'range generate
-ibuf_i: IBUF
-generic map (
-  IBUF_LOW_PWR => IBUF_LOW_PWR,
-  IOSTANDARD => IOSTANDARD)
-port map (
-  O => O(index),
-  I => I(index)
-);
-end generate;
-end rtl;
-
-
-----------------------------------------------------------------------------------
--- Company: LNF - INFN
--- Authors: Albicocco Pietro
--- Contact: pietro.albicocco@lnf.infn.it
-----------------------------------------------------------------------------------
--- File Name: OBUFTV.vhd
--- Target Devices: Xilinx - 7 Series
--- Tool Versions: VIVADO 2015.4
--- Description: OBUFTV extents the OBUFTV primitive to std_logic_vectors.
--- 
--- Dependencies: 
---
-----------------------------------------------------------------------------------
--- Revision History:
--- Revision 1.0 - 02/2016 - Albicocco P. - First Version
-----------------------------------------------------------------------------------
--- Additional Comments:
--- 
-----------------------------------------------------------------------------------
-library IEEE;
-use IEEE.STD_LOGIC_1164.ALL;
-use IEEE.NUMERIC_STD.ALL;
-
-library UNISIM;
-use UNISIM.VComponents.all;
-
-entity OBUFTV is
-generic (
-  WIDTH        : integer; 
-  DRIVE        : integer;
-  IOSTANDARD   : STRING;
-  SLEW         : STRING);
-port (
-  O            : out STD_LOGIC_VECTOR (WIDTH-1 downto 0);
-  I            : in  STD_LOGIC_VECTOR (WIDTH-1 downto 0);
-  T            : in  STD_LOGIC
-);
-end OBUFTV;
-
-architecture rtl of OBUFTV is
-begin
-gen: for index in I'range generate
-ibuf_i: OBUFT
-generic map (
-  DRIVE       => DRIVE,
-  IOSTANDARD  => IOSTANDARD,
-  SLEW        => SLEW)
-port map (
-  O => O(index),
-  I => I(index),
-  T => T
-);
-end generate;
-end rtl;
 ----------------------------------------------------------------------------------
 -- Company: LNF - INFN
 -- Authors: Albicocco Pietro
