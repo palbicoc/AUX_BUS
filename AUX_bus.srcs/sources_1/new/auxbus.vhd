@@ -1002,7 +1002,7 @@ Port Map(
   xbusy_n       => xbusy_n,
   -------- ROCK TRISTATE INPUT -------
   -- Slave Enable Tristate (Active Low)
-  xsel_n        <= xsel_n,
+  xsel_n        => xsel_n,
   -- Slave data is valid, Active LOW
   -- Slave recognized Master finished cycle, Active HIGH
   xdk           => xdk,
@@ -1018,9 +1018,9 @@ Port Map(
   sa            => sa,
   -------- EXTERNAL DEVICE SELECTION -------
   -- Use external Device Selection, Active HIGH
-  ext_s_en      <= ext_s_en,
+  ext_s_en      => ext_s_en,
   -- External Device selection , Active HIGH
-  x_ssel        <= x_ssel
+  x_ssel        => x_ssel
 );
 --------------------
 -- xAXI
