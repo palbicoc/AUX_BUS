@@ -3341,9 +3341,9 @@ begin
           -- there is a valid write address and write data
           -- on the write address and data bus. This design 
           -- expects no outstanding transactions.
-          if S_AXI_AWADDR = b"0000011" & "00" then
+          if S_AXI_AWADDR(ADDR_LSB + OPT_MEM_ADDR_BITS downto ADDR_LSB) = b"0000011" then
             axi_awready <= not ro_reg.A_afull;
-          elsif S_AXI_AWADDR = b"0000100" & "00" then
+          elsif S_AXI_AWADDR(ADDR_LSB + OPT_MEM_ADDR_BITS downto ADDR_LSB) = b"0000100" then
             axi_awready <= not ro_reg.B_afull;
           else
             axi_awready <= '1';
@@ -3389,9 +3389,9 @@ begin
             -- there is a valid write address and write data
             -- on the write address and data bus. This design 
             -- expects no outstanding transactions.           
-            if S_AXI_AWADDR = b"0000011" & "00" then
+            if S_AXI_AWADDR(ADDR_LSB + OPT_MEM_ADDR_BITS downto ADDR_LSB) = b"0000011" then
               axi_wready <= not ro_reg.A_afull;
-            elsif S_AXI_AWADDR = b"0000100" & "00" then
+            elsif S_AXI_AWADDR(ADDR_LSB + OPT_MEM_ADDR_BITS downto ADDR_LSB) = b"0000100" then
               axi_wready <= not ro_reg.B_afull;
             else
               axi_wready <= '1';
@@ -4780,10 +4780,10 @@ begin
       else
         if (axi_arready = '0' and S_AXI_ARVALID = '1') then
           -- indicates that the slave has acceped the valid read address
-          if S_AXI_ARADDR = b"0100011" & "00" then -- 35
+          if S_AXI_ARADDR(ADDR_LSB + OPT_MEM_ADDR_BITS downto ADDR_LSB) = b"0100011" then -- 35
             axi_arready <= not ro_reg.A_empty;
             A_req       <= not ro_reg.A_empty;
-          elsif S_AXI_ARADDR = b"0100100" & "00" then -- 36
+          elsif S_AXI_ARADDR(ADDR_LSB + OPT_MEM_ADDR_BITS downto ADDR_LSB) = b"0100100" then -- 36
             axi_arready <= not ro_reg.B_empty;
             B_req       <= not ro_reg.B_empty;
           else
