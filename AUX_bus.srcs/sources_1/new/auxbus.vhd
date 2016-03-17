@@ -2575,7 +2575,7 @@ attribute async_reg of isa : signal is "TRUE";
 attribute async_reg of msa : signal is "TRUE";
 -------- EXTERNAL DEVICE SELECTION -------
 signal i_ssel      : STD_LOGIC;
-signal m_ssel      : STD_LOGIC_VECTOR (3 downto 0);
+signal m_ssel      : STD_LOGIC;
 attribute async_reg of i_ssel : signal is "TRUE";
 attribute async_reg of m_ssel : signal is "TRUE";
 -- Tristate Output Enable (Active High)
@@ -2685,7 +2685,7 @@ end process;
 -- Slave is busy
 full    <= i_full or full_r;
 -- Slave has an error, Active LOW
-oberr_n <= not i_mmatch;
+xberr_n <= not i_mmatch;
 
 -------- COUNTER -------
 -- Counter Seq. Network
@@ -2830,24 +2830,24 @@ begin
     cns <= reset;
     -------- ROCK OPEN COLLECOTR INPUT -------
     -- Slave xsds bit is valid, Active HIGH
-    obk <= '0';
+    xbk <= '0';
     -- Slave has an error, Active LOW
-    oberr_n <= '1';
+    xberr_n <= '1';
     -- Slave is full, Active LOW
-    obusy_n <= not full;
+    xbusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
     -- Slave Enable Tristate (Active Low)
     tris_en <= '1';
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
-    odk <= '1';
+    xdk <= '1';
     -- Actual Slave Data Word is the last, Active LOW
-    oeob_n <= '1';
+    xeob_n <= '1';
     -- Slave Data (19 downto 0)
-    od <= (others => '0');
+    xd <= (others => '0');
     -- Slave has data for a given Trigger Number
     -- Can be either tristate or always enabled
-    osds <= '0';
+    xsds <= '0';
   when trig =>
     -- Timing
     cvalue <= std_logic_vector(to_unsigned(thold35, Ncnt));
@@ -2863,31 +2863,31 @@ begin
     end if;
     -- Slave has data for a given Trigger Number
     -- Can be either tristate or always enabled
-    osds <= i_nodata and isyncrd_n;
+    xsds <= i_nodata and isyncrd_n;
     --osds_en <= '0';
     -- Slave xsds bit is valid, Active HIGH
-    obk <= '0';   
+    xbk <= '0';   
     if cvalid ='1' then
       -- Wait for the end of the trigger cycle (i.e. xtrgv = '1')
-      obk <= '1';
+      xbk <= '1';
       done <= '1';
       read_data <= i_nodata and isyncrd_n;
     end if;
     -------- ROCK OPEN COLLECOTR INPUT -------
     -- Slave has an error, Active LOW
-    oberr_n <= '1';
+    xberr_n <= '1';
     -- Slave is full, Active LOW
-    obusy_n <= not full;
+    xbusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
     -- Slave Enable Tristate (Active Low)
     tris_en <= '1';
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
-    odk <= '1';
+    xdk <= '1';
     -- Actual Slave Data Word is the last, Active LOW
-    oeob_n <= '1';
+    xeob_n <= '1';
     -- Slave Data (19 downto 0)
-    od <= (others => '0');
+    xd <= (others => '0');
   when readout =>
     -- Timing
     cvalue <= (others => '0');
@@ -2895,24 +2895,24 @@ begin
     cns <= reset;
     -------- ROCK OPEN COLLECOTR INPUT -------
     -- Slave xsds bit is valid, Active HIGH
-    obk <= '0';
+    xbk <= '0';
     -- Slave has an error, Active LOW
-    oberr_n <= '1';
+    xberr_n <= '1';
     -- Slave is full, Active LOW
-    obusy_n <= not full;
+    xbusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
     -- Slave Enable Tristate (Active Low)
     tris_en <= '0';
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
-    odk <= '1';
+    xdk <= '1';
     -- Actual Slave Data Word is the last, Active LOW
-    oeob_n <= '1';
+    xeob_n <= '1';
     -- Slave Data (19 downto 0)
-    od <= (others => '0');
+    xd <= (others => '0');
     -- Slave has data for a given Trigger Number
     -- Can be either tristate or always enabled
-    osds <= '0';
+    xsds <= '0';
     -------- START DATA READOUT -------
     first_word_flag <= first_word_flag_r;
     if (ssel = '1') and ias_n = '0' then
@@ -2922,9 +2922,9 @@ begin
         first_word_flag <= first_word_flag_r or '1';
         -- Set valid data in xd
         -- Slave Data (19 downto 0)
-        od <= i_d;
+        xd <= i_d;
             -- Actual Slave Data Word is the last, Active LOW
-        oeob_n <= not i_last;
+        xeob_n <= not i_last;
         -- Wait for 15ns after data valid
         cvalue <= std_logic_vector(to_unsigned(thold15, Ncnt));
         if i_dv = '1' then
@@ -2934,7 +2934,7 @@ begin
         -- After 15 ns assert xdk and xeob
           -- Slave data is valid, Active LOW
           -- Slave recognized Master finished cycle, Active HIGH
-          odk <= '0';
+          xdk <= '0';
         end if;
       else
         -- Request new data
@@ -2952,24 +2952,24 @@ begin
     cns <= reset;
     -------- ROCK OPEN COLLECOTR INPUT -------
     -- Slave xsds bit is valid, Active HIGH
-    obk <= '0';
+    xbk <= '0';
     -- Slave has an error, Active LOW
-    oberr_n <= '1';
+    xberr_n <= '1';
     -- Slave is full, Active LOW
-    obusy_n <= not full;
+    xbusy_n <= not full;
     -------- ROCK TRISTATE INPUT -------
     -- Slave Enable Tristate (Active Low)
     tris_en <= '0';
     -- Slave data is valid, Active LOW
     -- Slave recognized Master finished cycle, Active HIGH
-    odk <= '1';
+    xdk <= '1';
     -- Actual Slave Data Word is the last, Active LOW
-    oeob_n <= '1';
+    xeob_n <= '1';
     -- Slave Data (19 downto 0)
-    od <= (others => '0');
+    xd <= (others => '0');
     -- Slave has data for a given Trigger Number
     -- Can be either tristate or always enabled
-    osds <= '0';
+    xsds <= '0';
     -------- START SYNC READOUT -------
     first_word_flag <= first_word_flag_r;
     if (ssel = '1') and ias_n = '0' then
@@ -2978,9 +2978,9 @@ begin
       first_word_flag <= first_word_flag_r or '1';
       -- Set valid data in xd
       -- Slave Data (19 downto 0)
-      od <= X"00" & i_t;
+      xd <= X"00" & i_t;
           -- Actual Slave Data Word is the last, Active LOW
-      oeob_n <= '0';
+      xeob_n <= '0';
       -- Wait for 15ns after data valid
       cvalue <= std_logic_vector(to_unsigned(thold15, Ncnt));
       if i_tv = '1' then
@@ -2990,7 +2990,7 @@ begin
       -- After 15 ns assert xdk and xeob
         -- Slave data is valid, Active LOW
         -- Slave recognized Master finished cycle, Active HIGH
-        odk <= '0';
+        xdk <= '0';
       end if;
     elsif first_word_flag_r = '1' then
       done <= '1';
