@@ -2818,7 +2818,7 @@ begin
 end process;
 
 -- Output Transition Functions
-ocomb_pr: process(pstate,ids, cvalid, ssel, i_last, ias_n, i_d, isyncrd_n, first_word_flag_r, i_nodata, i_dv, i_t, i_tv, i_hdr_d, i_mmatch, i_hdr_dv, it) is
+ocomb_pr: process(pstate,ids, cvalid, ssel, i_last, ias_n, i_d, isyncrd_n, first_word_flag_r, i_nodata, i_dv, i_t, i_tv, i_hdr_d, i_mmatch, i_hdr_dv, it, full) is
 begin
   read_data       <= '0';
   first_word_flag <= '0';

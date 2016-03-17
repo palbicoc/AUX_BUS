@@ -1130,8 +1130,8 @@ begin
     wait;
   end if;
   -- Enable AXI FIFO READ and WRITE
-  axi_write(2, 3+48);
-  report "-- Write 27 @ Reg 2 (Enable AXI FIFO READ and WRITE):";
+  axi_write(2, 3+48); -- 51 -- x33 @ 8
+  report "-- Write x33 @ Reg 2 (Enable AXI FIFO READ and WRITE):";
   -- Read Reg 2
   axi_read(2);
   report "   Read Reg 2: " & integer'image(to_integer(unsigned(axi_rx_data)));
