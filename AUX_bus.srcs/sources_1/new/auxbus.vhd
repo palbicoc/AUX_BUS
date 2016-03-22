@@ -911,7 +911,7 @@ B_Wr_en_i     <= rw_reg.B_write_en   when rw_reg.B_FIFO_write_en = '1' else
 --------------------
 -- xCTRL
 --------------------
-xctrl_reset <= rst or rw_reg.reset or not AUX_Enable;
+xctrl_reset <= rst or rw_reg.reset or AUX_Enable;
 xctrl_inst: xctrl
 Port Map(
   clk           => clk,
@@ -941,7 +941,7 @@ Port Map(
 --------------------
 -- xFRONT
 --------------------
-xfront_reset <= rst or rw_reg.reset or not AUX_Enable;
+xfront_reset <= rst or rw_reg.reset or AUX_Enable;
 full         <= apfull or bpfull;
 xfront_inst: xfront
 Generic Map(
@@ -1525,7 +1525,7 @@ SIGNAL achannel         : STD_LOGIC_VECTOR(6 downto 0);
 SIGNAL aw               : STD_LOGIC;
 SIGNAL ad               : STD_LOGIC_VECTOR(21 downto 0);
 SIGNAL A_Din_i          : STD_LOGIC_VECTOR(21 downto 0);
-SIGNAL ainc             : STD_LOGIC_VECTOR(11 downto 0);
+SIGNAL ainc             : STD_LOGIC_VECTOR(11 downto 0) := (others => '1');
 SIGNAL adone_reg        : STD_LOGIC;
 --------------------
 -- PRBS_ANY: B DATA GENERATION
@@ -1552,7 +1552,7 @@ SIGNAL bchannel         : STD_LOGIC_VECTOR(6 downto 0);
 SIGNAL bw               : STD_LOGIC;
 SIGNAL bd               : STD_LOGIC_VECTOR(21 downto 0);
 SIGNAL B_Din_i          : STD_LOGIC_VECTOR(21 downto 0);
-SIGNAL binc             : STD_LOGIC_VECTOR(11 downto 0);
+SIGNAL binc             : STD_LOGIC_VECTOR(11 downto 0) := (others => '1');
 SIGNAL bdone_reg        : STD_LOGIC;
 
 begin
@@ -1663,7 +1663,7 @@ variable a_dataexist  : std_logic := '0';
 variable a_dataislast : std_logic := '0';
 begin
   if rst = '1' then
-    ainc         <= (others => '0');
+    ainc         <= (others => '1');
     aw           <= '0';
     a_dataexist  := '0';
     a_dataislast := '0';
@@ -1706,7 +1706,7 @@ begin
     end if;
     if test = '0' then
       -- Test mode is disabled
-      ainc         <= (others => '0');
+      ainc         <= (others => '1');
       aw           <= '0';
       a_dataexist  := '0';
       a_dataislast := '0';
@@ -1729,7 +1729,7 @@ variable b_dataexist  : std_logic := '0';
 variable b_dataislast : std_logic := '0';
 begin
   if rst = '1' then
-    binc         <= (others => '0');
+    binc         <= (others => '1');
     bw           <= '0';
     b_dataexist  := '0';
     b_dataislast := '0';
@@ -1772,7 +1772,7 @@ begin
     end if;
     if test = '0' then
       -- Test mode is disabled
-      binc         <= (others => '0');
+      binc         <= (others => '1');
       bw           <= '0';
       b_dataexist  := '0';
       b_dataislast := '0';
@@ -2433,7 +2433,7 @@ Port (
   -- FIFO Full Flag, propagated and kept to xbusy
   i_full   : in  STD_LOGIC;
   -------- ROCK OUTPUT -------
-  -- Trigger Bus, first valid trigger is 001
+  -- Trigger Bus, first valid trigger is 000
   xt : in STD_LOGIC_VECTOR (11 downto 0);
   -- Trigger Bus Data is valide, Active LOW
   xtrgv_n : in STD_LOGIC;
@@ -2491,7 +2491,7 @@ architecture rtl of xfront is
 --constant thold15             : integer := (15-clock_period/2)/clock_period;
 -- internal to output
 constant thold35             : integer := (1000*(35+clock_period)-1)/1000/clock_period-1;
-constant thold15             : integer := (1000*(15+clock_period)-1)/1000/clock_period;
+constant thold15             : integer := (1000*(15+clock_period)-1)/1000/clock_period+1;
 --------------------
 -- Counter
 --------------------
@@ -2590,21 +2590,21 @@ begin
     mt         <= (others => '0');
     it         <= (others => '0');
       -- Trigger Bus Data is valide, Active LOW
-    mtrgv_n    <= '0';
-    itrgv_n    <= '0';
+    mtrgv_n    <= '1';
+    itrgv_n    <= '1';
     -- Address Bus
     ma         <= (others => '0');
     ia         <= (others => '0');
     -- Address Bus is Valid
-    mas_n      <= '0';
-    ias_n      <= '0';
+    mas_n      <= '1';
+    ias_n      <= '1';
     -- ROCK ready to read from slave, Active LOW
     -- ROCK finished to read from slave, Active HIGH
-    mds        <= '0';
-    ids        <= '0';
+    mds        <= '1';
+    ids        <= '1';
     -- Master is initiating a synch check, Active LOW
-    msyncrd_n  <= '0';
-    isyncrd_n  <= '0';
+    msyncrd_n  <= '1';
+    isyncrd_n  <= '1';
     -- ROCK send a system HALT due to Error,
     msyshalt   <= '0';
     isyshalt   <= '0';
@@ -2615,6 +2615,10 @@ begin
     -- Slave Geographical Address
     msa        <= (others => '0');
     isa        <= (others => '0');
+    -------- EXTERNAL DEVICE SELECTION -------
+    -- External Device selection , Active HIGH
+    m_ssel     <= '0';
+    i_ssel     <= '0';
   else
     if clk2x'event and clk2x='1' then
       -- Trigger Bus, first valid trigger is 001
@@ -2788,7 +2792,7 @@ begin
     end if;
   when trig =>
   -- Trigger Cycle
-    if (isyncrd_n = '0') and done = '1' then
+    if (itrgv_n = '1') and (isyncrd_n = '0') and done = '1' then
       nstate <= sync;
     elsif (itrgv_n = '1') and done = '1' and i_nodata='1' then
       nstate <= idle;       -- No data
@@ -2818,7 +2822,7 @@ begin
 end process;
 
 -- Output Transition Functions
-ocomb_pr: process(pstate,ids, cvalid, ssel, i_last, ias_n, i_d, isyncrd_n, first_word_flag_r, i_nodata, i_dv, i_t, i_tv, i_hdr_d, i_mmatch, i_hdr_dv, it) is
+ocomb_pr: process(pstate,ids, cvalid, ssel, i_last, ias_n, i_d, isyncrd_n, first_word_flag_r, i_nodata, i_dv, i_t, i_tv, i_hdr_d, i_mmatch, i_hdr_dv, it, full) is
 begin
   read_data       <= '0';
   first_word_flag <= '0';
@@ -4780,14 +4784,21 @@ begin
       else
         if (axi_arready = '0' and S_AXI_ARVALID = '1') then
           -- indicates that the slave has acceped the valid read address
+          --out alp: AXI get stuck if fifo is empty => empty moved also  in fifo data reg. 
+--          if S_AXI_ARADDR = b"0100011" & "00" then -- 35
+--            axi_arready <= not ro_reg.A_empty;
+--            A_req       <= not ro_reg.A_empty;
+--          elsif S_AXI_ARADDR = b"0100100" & "00" then -- 36
+--            axi_arready <= not ro_reg.B_empty;
+--            B_req       <= not ro_reg.B_empty;
+--          else
+--            axi_arready <= '1';
+--          end if;
+          axi_arready <= '1';
           if S_AXI_ARADDR = b"0100011" & "00" then -- 35
-            axi_arready <= not ro_reg.A_empty;
             A_req       <= not ro_reg.A_empty;
           elsif S_AXI_ARADDR = b"0100100" & "00" then -- 36
-            axi_arready <= not ro_reg.B_empty;
             B_req       <= not ro_reg.B_empty;
-          else
-            axi_arready <= '1';
           end if;
           -- Read Address latching 
           axi_araddr  <= S_AXI_ARADDR;           
@@ -4917,9 +4928,9 @@ begin
         when b"0100010" =>
           reg_data_out <= slv_reg34;
         when b"0100011" =>
-          reg_data_out <= x"00" & b"00" & ro_reg.A_read_data;
+          reg_data_out <= "000" & ro_reg.A_empty & x"0" & b"00" & ro_reg.A_read_data;
         when b"0100100" =>
-          reg_data_out <= x"00" & b"00" & ro_reg.B_read_data;
+          reg_data_out <= "000" & ro_reg.B_empty & x"0" & b"00" & ro_reg.B_read_data;
         when b"0100101" =>
           reg_data_out <= slv_reg37;
         when b"0100110" =>
