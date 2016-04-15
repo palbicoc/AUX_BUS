@@ -22,7 +22,11 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.all;
 
 package xpack is
-------------------------------------------------------------------
+-----------------------------------------------------------------
+---- TYPES ----
+-----------------------------------------------------------------
+type test_data_pattern is array (0 to 3) of std_logic_vector(11 downto 0);
+-----------------------------------------------------------------
 ---- RECORDS ----
 -----------------------------------------------------------------
 --------------------
@@ -120,6 +124,19 @@ record
   B_write_data     : std_logic_vector (31 DOWNTO 0);
   -- B Write Enable (Sig)
   B_write_en      : std_logic;
+  -------- TEST PATTERN --------
+  -- Enable A Fixed Pattern
+  A_pattern_isfixed: std_logic;
+  -- Number of event of A (last 2 bit used)
+  A_Nevent         : std_logic_vector (2 DOWNTO 0);
+  -- 4 pattern registers for A
+  A_event_data     : test_data_pattern;
+  -- Enable B Fixed Pattern
+  B_pattern_isfixed: std_logic;
+  -- Number of event of B (last 2 bit used)
+  B_Nevent         : std_logic_vector (2 DOWNTO 0);
+  -- 4 pattern registers for B
+  B_event_data     : test_data_pattern;
 end record;
 ------------------------------------------------------------------
 ---- CONSTANTS ----
@@ -145,7 +162,14 @@ constant rw_defaults : rw_reg_type := (
   '0',               -- B read enable
   '0',               -- Enable Write to B FIFO
   (others => '0'),   -- B write data
-  '0'                -- B Write Enable
+  '0',               -- B Write Enable
+  --------- TEST PATTERN --------
+  '0',
+  "001",
+  (x"AAA", x"555", x"0F0", x"F0F"),
+  '0',
+  "001",
+  (x"AAA", x"555", x"0F0", x"F0F")
 );
 ------------------------------------------------------------------
 ---- FUNCTIONS ----
@@ -389,6 +413,8 @@ Port (
   rw_reg        : in  rw_reg_type;
   -------- Test Control Bit -------
   test_mode     : out  STD_LOGIC;
+  -------- Input Trigger -------
+  trigger       : in   STD_LOGIC_VECTOR(11 DOWNTO 0);
   -------- A FIFO Interface -------
   A_Wr_clk      : in  STD_LOGIC;
   A_Din         : out STD_LOGIC_VECTOR(22-1 DOWNTO 0);
@@ -781,6 +807,8 @@ Port Map (
   rw_reg        => rw_reg,
   -------- Test Control Bit -------
   test_mode     => test_mode,
+  -------- Input Trigger -------
+  trigger       => trigger,
   -------- A FIFO Interface -------
   A_Wr_clk      => A_Wr_clk,
   A_Din         => A_Din_t,
@@ -877,8 +905,8 @@ a_dv_xctrl    <= '0'       when rw_reg.A_FIFO_read_en = '1' or rw_reg.B_FIFO_rea
 b_dv_xctrl    <= '0'       when rw_reg.A_FIFO_read_en = '1' or rw_reg.B_FIFO_read_en = '1'   else
                  b_dv;
 -- Full to XFRONT
-full_i        <= '1'       when rw_reg.A_FIFO_write_en = '1' or rw_reg.B_FIFO_write_en = '1' else
-                 busy_t    when test_mode = '1'                                              else
+full_i        <= --'0'       when rw_reg.A_FIFO_write_en = '1' or rw_reg.B_FIFO_write_en = '1' else
+                 --busy_t    when test_mode = '1'                                              else
                  full;
 busy_t        <= A_busy_t  or B_busy_t;
 -- Data Read Enable to XFIFO
@@ -1439,6 +1467,8 @@ Port (
   rw_reg        : in  rw_reg_type;
   -------- Test Control Bit -------
   test_mode     : out STD_LOGIC;
+    -------- Input Trigger -------
+  trigger       : in   STD_LOGIC_VECTOR(11 DOWNTO 0);
   -------- A FIFO Interface -------
   A_Wr_clk      : in  STD_LOGIC;
   A_Din         : out STD_LOGIC_VECTOR(22-1 DOWNTO 0);
@@ -1507,6 +1537,7 @@ SIGNAL a_inj            : STD_LOGIC_VECTOR(11 downto 0);
 SIGNAL a_req            : STD_LOGIC;
 SIGNAL areq             : STD_LOGIC;
 SIGNAL a_data           : STD_LOGIC_VECTOR(11 downto 0);
+SIGNAL a_data_prbs      : STD_LOGIC_VECTOR(11 downto 0);
 --------------------
 -- PRBS_ANY: A EVENT GENERATION
 --------------------
@@ -1518,6 +1549,7 @@ SIGNAL aev_req          : STD_LOGIC;
 --------------------
 SIGNAL adone            : STD_LOGIC;
 SIGNAL acnt             : STD_LOGIC_VECTOR(6 downto 0);
+SIGNAL acnt_r           : STD_LOGIC_VECTOR(6 downto 0);
 SIGNAL achannel         : STD_LOGIC_VECTOR(6 downto 0);
 --------------------
 -- A FIFO STIMULI
@@ -1525,7 +1557,7 @@ SIGNAL achannel         : STD_LOGIC_VECTOR(6 downto 0);
 SIGNAL aw               : STD_LOGIC;
 SIGNAL ad               : STD_LOGIC_VECTOR(21 downto 0);
 SIGNAL A_Din_i          : STD_LOGIC_VECTOR(21 downto 0);
-SIGNAL ainc             : STD_LOGIC_VECTOR(11 downto 0) := (others => '1');
+SIGNAL ainc             : STD_LOGIC_VECTOR(11 downto 0) := (others => '0');
 SIGNAL adone_reg        : STD_LOGIC;
 --------------------
 -- PRBS_ANY: B DATA GENERATION
@@ -1533,6 +1565,7 @@ SIGNAL adone_reg        : STD_LOGIC;
 SIGNAL b_inj            : STD_LOGIC_VECTOR(11 downto 0);
 SIGNAL b_req            : STD_LOGIC;
 SIGNAL breq             : STD_LOGIC;
+SIGNAL b_data_prbs      : STD_LOGIC_VECTOR(11 downto 0);
 SIGNAL b_data           : STD_LOGIC_VECTOR(11 downto 0);
 --------------------
 -- PRBS_ANY: B EVENT GENERATION
@@ -1545,6 +1578,7 @@ SIGNAL bev_req          : STD_LOGIC;
 --------------------
 SIGNAL bdone            : STD_LOGIC;
 SIGNAL bcnt             : STD_LOGIC_VECTOR(6 downto 0);
+SIGNAL bcnt_r           : STD_LOGIC_VECTOR(6 downto 0);
 SIGNAL bchannel         : STD_LOGIC_VECTOR(6 downto 0);
 --------------------
 -- B FIFO STIMULI
@@ -1552,8 +1586,9 @@ SIGNAL bchannel         : STD_LOGIC_VECTOR(6 downto 0);
 SIGNAL bw               : STD_LOGIC;
 SIGNAL bd               : STD_LOGIC_VECTOR(21 downto 0);
 SIGNAL B_Din_i          : STD_LOGIC_VECTOR(21 downto 0);
-SIGNAL binc             : STD_LOGIC_VECTOR(11 downto 0) := (others => '1');
+SIGNAL binc             : STD_LOGIC_VECTOR(11 downto 0) := (others => '0');
 SIGNAL bdone_reg        : STD_LOGIC;
+SIGNAL b_req_init       : STD_LOGIC;
 
 begin
 
@@ -1588,8 +1623,10 @@ a_data_gen: PRBS_ANY
   CLK           => A_Wr_clk,
   DATA_IN       => a_inj,
   EN            => areq,
-  DATA_OUT      => a_data
+  DATA_OUT      => a_data_prbs
 );
+a_data <= rw_reg.A_event_data(to_integer(unsigned(acnt_r(1 downto 0)))) when rw_reg.A_pattern_isfixed = '1' else
+          a_data_prbs;
 --------------------
 -- PRBS_ANY: B DATA GENERATION
 --------------------
@@ -1608,8 +1645,10 @@ b_data_gen: PRBS_ANY
   CLK           => B_Wr_clk,
   DATA_IN       => b_inj,
   EN            => breq,
-  DATA_OUT      => b_data
+  DATA_OUT      => b_data_prbs
 );
+b_data <= rw_reg.B_event_data(to_integer(unsigned(bcnt_r(1 downto 0)))) when rw_reg.B_pattern_isfixed='1' else
+          b_data_prbs;
 --------------------
 -- PRBS_ANY: A EVENT GENERATION
 --------------------
@@ -1628,7 +1667,8 @@ aevent_gen: PRBS_ANY
   EN            => aev_req,
   DATA_OUT      => an_10bit
 );
-an <= std_logic_vector( unsigned('0' & an_10bit(9 downto 5)) + unsigned(an_10bit(4 downto 1)) + unsigned(an_10bit(0 downto 0)) );
+an <=  "000" & std_logic_vector(1 + unsigned('0' & rw_reg.A_Nevent(1 downto 0))) when rw_reg.A_pattern_isfixed='1' else 
+       std_logic_vector( unsigned('0' & an_10bit(9 downto 5)) + unsigned(an_10bit(4 downto 1)) + unsigned(an_10bit(0 downto 0)) );
 --------------------
 -- PRBS_ANY: B EVENT GENERATION
 --------------------
@@ -1647,7 +1687,8 @@ bevent_gen: PRBS_ANY
   EN            => bev_req,
   DATA_OUT      => bn_10bit
 );
-bn <= std_logic_vector( unsigned('0' & bn_10bit(9 downto 5)) + unsigned(bn_10bit(4 downto 1)) + unsigned(bn_10bit(0 downto 0)) );
+bn <= "000" & std_logic_vector(1 + unsigned('0' & rw_reg.B_Nevent(1 downto 0))) when rw_reg.B_pattern_isfixed = '1' else
+      std_logic_vector( unsigned('0' & bn_10bit(9 downto 5)) + unsigned(bn_10bit(4 downto 1)) + unsigned(bn_10bit(0 downto 0)) );
 --------------------
 -- A FIFO STIMULI
 --------------------
@@ -1663,7 +1704,8 @@ variable a_dataexist  : std_logic := '0';
 variable a_dataislast : std_logic := '0';
 begin
   if rst = '1' then
-    ainc         <= (others => '1');
+    ainc         <= (others => '0');
+    acnt_r       <= (others => '0');
     aw           <= '0';
     a_dataexist  := '0';
     a_dataislast := '0';
@@ -1671,11 +1713,14 @@ begin
     ad           <= (others => '0');
   elsif A_Wr_clk'event and A_Wr_clk='1' then
     adone_reg    <= adone;
+    acnt_r       <= acnt;
     ainc         <= ainc;
     aw           <= '0';
     if adone = '1' then
       -- Start a new write process
-      aw           <= '1';
+      if adone_reg = '1' and std_logic_vector(unsigned(trigger) + 1) /= ainc then
+        aw           <= '1';
+      end if;
       if adone_reg = '0' then
         -- Increment trigger number
         ainc          <= std_logic_vector( unsigned(ainc) + 1);
@@ -1729,7 +1774,8 @@ variable b_dataexist  : std_logic := '0';
 variable b_dataislast : std_logic := '0';
 begin
   if rst = '1' then
-    binc         <= (others => '1');
+    binc         <= (others => '0');
+    bcnt_r       <= (others => '0');
     bw           <= '0';
     b_dataexist  := '0';
     b_dataislast := '0';
@@ -1737,11 +1783,14 @@ begin
     bd           <= (others => '0');
   elsif B_Wr_clk'event and B_Wr_clk='1' then
     bdone_reg    <= bdone;
+    bcnt_r       <= bcnt;
     binc         <= binc;
     bw           <= '0';
     if bdone = '1' then
       -- Start a new write process
-      bw           <= '1';
+      if bdone_reg = '1' and std_logic_vector(unsigned(trigger) + 1) /= binc then
+        bw           <= '1';
+      end if;
       if bdone_reg = '0' then
         -- Increment trigger number
         binc          <= std_logic_vector( unsigned(binc) + 1 );
@@ -1800,7 +1849,7 @@ begin
     adone   <= '1';
     A_Din_i <= (others => '0');
     A_Wr_en <= '0';
-    a_req   <= a_req;
+    a_req   <= '0' or (b_req_init and B_Almost_full);
     aev_req <= '0';
     if aw = '1' or adone = '0' then
     -- Start FIFO Write
@@ -1864,15 +1913,17 @@ begin
     bdone   <= '1';
     B_Din_i <= (others => '0');
     B_Wr_en <= '0';
-    b_req   <= '1';
+    b_req   <= '0';
+    b_req_init <= '1';
     bev_req <= '0';
   elsif B_Wr_clk'event and B_Wr_clk='1' then
+    b_req_init <= B_Almost_full and b_req_init;
     bcnt    <= (others => '0');
     bchannel<= (others => '0');
     bdone   <= '1';
     B_Din_i <= (others => '0');
     B_Wr_en <= '0';
-    b_req   <= b_req;
+    b_req   <= '0' or (b_req_init and B_Almost_full);
     bev_req <= '0';
     if bw = '1' or bdone = '0' then
     -- Start FIFO Write
@@ -2509,14 +2560,26 @@ signal nstate               : xstate;
 -- Registerd Signals
 signal full_r               : std_logic;
 signal full                 : std_logic;
--- Counter signals
-signal cvalue 				      : std_logic_vector(Ncnt-1 downto 0);
-signal ccnt    				      : std_logic_vector(Ncnt-1 downto 0);
-signal cvalid               : std_logic;
 signal read_data            : std_logic;
 signal read_data_r          : std_logic;
 signal first_word_flag      : std_logic;
 signal first_word_flag_r    : std_logic;
+signal read_on_last         : std_logic;
+signal read_on_last_r       : std_logic;
+-- Slave data is valid, Active LOW
+-- Slave recognized Master finished cycle, Active HIGH
+signal xdk_r                : std_logic;
+signal odk                  : std_logic;
+-- Actual Slave Data Word is the last, Active LOW
+signal xeob_n_r             : std_logic;
+signal oeob_n               : std_logic;
+-- Slave Data (19 downto 0)
+signal xd_r                 : std_logic_vector(19 downto 0);
+signal od                   : std_logic_vector(19 downto 0);
+-- Counter signals
+signal cvalue 				      : std_logic_vector(Ncnt-1 downto 0);
+signal ccnt    				      : std_logic_vector(Ncnt-1 downto 0);
+signal cvalid               : std_logic;
 -- Counter State Machine
 type cstate is (idle, reset, start, run, freerun);
   -- PS
@@ -2687,7 +2750,7 @@ begin
   end if;
 end process;
 -- Slave is busy
-full    <= i_full or full_r;
+full    <= i_full;-- or full_r;
 -- Slave has an error, Active LOW
 xberr_n <= not i_mmatch;
 
@@ -2764,10 +2827,24 @@ begin
     read_data_r <= '0';
     first_word_flag_r <= '0';
     pstate <= idle;
+    -- Slave data is valid, Active LOW
+    -- Slave recognized Master finished cycle, Active HIGH
+    xdk_r <= '1';
+    -- Actual Slave Data Word is the last, Active LOW
+    xeob_n_r <= '1';
+    -- Slave Data (19 downto 0)
+    xd_r <= (others => '0');
   elsif clk='1' and clk'event then
     read_data_r <= read_data;
     first_word_flag_r <= first_word_flag;
     pstate <= nstate;
+    -- Slave data is valid, Active LOW
+    -- Slave recognized Master finished cycle, Active HIGH
+    xdk_r <= odk;
+    -- Actual Slave Data Word is the last, Active LOW
+    xeob_n_r <= oeob_n;
+    -- Slave Data (19 downto 0)
+    xd_r <= od;
   end if;
 end process;
 
@@ -2821,11 +2898,14 @@ begin
   end case;
 end process;
 
--- Output Transition Functions
-ocomb_pr: process(pstate,ids, cvalid, ssel, i_last, ias_n, i_d, isyncrd_n, first_word_flag_r, i_nodata, i_dv, i_t, i_tv, i_hdr_d, i_mmatch, i_hdr_dv, it, full) is
+ocomb_pr: process(pstate,ids, cvalid, ssel, i_last, ias_n, i_d, isyncrd_n, first_word_flag_r, i_nodata, i_dv, i_t, odk, xdk_r, oeob_n, xeob_n_r, od, xd_r, i_tv, i_hdr_d, i_mmatch, i_hdr_dv, it, full) is
 begin
   read_data       <= '0';
   first_word_flag <= '0';
+  odk <= '1';
+  oeob_n <= '1';
+  od <= (others => '0');
+  read_on_last <= '0';
   case pstate is
   when idle =>
     -- Timing
@@ -2892,11 +2972,77 @@ begin
     xeob_n <= '1';
     -- Slave Data (19 downto 0)
     xd <= (others => '0');
+--  when readout =>
+--    -- Timing
+--    cvalue <= (others => '0');
+--    done <= '0';
+--    cns <= reset;
+--    -------- ROCK OPEN COLLECOTR INPUT -------
+--    -- Slave xsds bit is valid, Active HIGH
+--    xbk <= '0';
+--    -- Slave has an error, Active LOW
+--    xberr_n <= '1';
+--    -- Slave is full, Active LOW
+--    xbusy_n <= not full;
+--    -------- ROCK TRISTATE INPUT -------
+--    -- Slave Enable Tristate (Active Low)
+--    tris_en <= '0';
+--    -- Slave data is valid, Active LOW
+--    -- Slave recognized Master finished cycle, Active HIGH
+--    xdk <= '1';
+--    -- Actual Slave Data Word is the last, Active LOW
+--    xeob_n <= '1';
+--    -- Slave Data (19 downto 0)
+--    xd <= (others => '0');
+--    -- Slave has data for a given Trigger Number
+--    -- Can be either tristate or always enabled
+--    xsds <= '0';
+--    -------- START DATA READOUT -------
+--    first_word_flag <= first_word_flag_r;
+--    if (ssel = '1') and ias_n = '0' then
+--      -- Slave Enable Tristate (Active Low)
+--      tris_en <= '1';
+--      if (ids = '0') or (i_last = '1') then
+--        first_word_flag <= first_word_flag_r or '1';
+--        -- Set valid data in xd
+--        -- Slave Data (19 downto 0)
+--        xd <= i_d;
+--            -- Actual Slave Data Word is the last, Active LOW
+--        xeob_n <= not i_last;
+--        -- Wait for 15ns after data valid
+--        cvalue <= std_logic_vector(to_unsigned(thold15, Ncnt));
+--        if i_dv = '1' then
+--          cns <= run;
+--        end if;
+--        if cvalid = '1' then
+--        -- After 15 ns assert xdk and xeob
+--          -- Slave data is valid, Active LOW
+--          -- Slave recognized Master finished cycle, Active HIGH
+--          xdk <= '0';
+--        end if;
+--      else
+--        -- Request new data
+--        read_data <= '1' and first_word_flag_r;
+--      end if;
+--    elsif first_word_flag_r = '1' then
+--      done <= '1';
+--      read_data <= '1';
+--    end if;
   when readout =>
-    -- Timing
-    cvalue <= (others => '0');
-    done <= '0';
+    -- Slave data is valid, Active LOW
+    -- Slave recognized Master finished cycle, Active HIGH
+    xdk    <= odk;
+    odk    <= xdk_r;
+    -- Actual Slave Data Word is the last, Active LOW
+    xeob_n <= oeob_n;
+    oeob_n <= xeob_n_r;
+    -- Slave Data (19 downto 0)
+    xd     <= od;
+    od     <= xd_r;
+    -- Timing: Wait for 15ns after data valid
+    cvalue <= std_logic_vector(to_unsigned(thold15, Ncnt));
     cns <= reset;
+    done <= '0';
     -------- ROCK OPEN COLLECOTR INPUT -------
     -- Slave xsds bit is valid, Active HIGH
     xbk <= '0';
@@ -2907,46 +3053,45 @@ begin
     -------- ROCK TRISTATE INPUT -------
     -- Slave Enable Tristate (Active Low)
     tris_en <= '0';
-    -- Slave data is valid, Active LOW
-    -- Slave recognized Master finished cycle, Active HIGH
-    xdk <= '1';
-    -- Actual Slave Data Word is the last, Active LOW
-    xeob_n <= '1';
-    -- Slave Data (19 downto 0)
-    xd <= (others => '0');
+    -- Latched Output
+    if (ids = '1') then
+      -- Slave data is valid, Active LOW
+      -- Slave recognized Master finished cycle, Active HIGH
+      odk <= '1';
+      -- Actual Slave Data Word is the last, Active LOW
+      oeob_n <= not i_last;
+      -- Slave Data (19 downto 0)
+      od <= i_d;
+    end if;
     -- Slave has data for a given Trigger Number
     -- Can be either tristate or always enabled
     xsds <= '0';
     -------- START DATA READOUT -------
     first_word_flag <= first_word_flag_r;
+    read_on_last    <= read_on_last_r and i_last and read_data and not read_data_r;
     if (ssel = '1') and ias_n = '0' then
+      cns <= run;
+      if i_dv = '0' then
+        cns <= reset;
+      end if;
       -- Slave Enable Tristate (Active Low)
       tris_en <= '1';
-      if (ids = '0') or (i_last = '1') then
+      if (ids = '0') then
         first_word_flag <= first_word_flag_r or '1';
-        -- Set valid data in xd
-        -- Slave Data (19 downto 0)
-        xd <= i_d;
-            -- Actual Slave Data Word is the last, Active LOW
-        xeob_n <= not i_last;
-        -- Wait for 15ns after data valid
-        cvalue <= std_logic_vector(to_unsigned(thold15, Ncnt));
-        if i_dv = '1' then
-          cns <= run;
-        end if;
+        read_data <= '1';
         if cvalid = '1' then
-        -- After 15 ns assert xdk and xeob
+          -- After at least 15 ns xdk and xeob are assert
           -- Slave data is valid, Active LOW
           -- Slave recognized Master finished cycle, Active HIGH
-          xdk <= '0';
+          odk <= '0'; -- Latched
         end if;
-      else
-        -- Request new data
-        read_data <= '1' and first_word_flag_r;
+        if odk = '0' then
+          cns <= reset;
+        end if;
       end if;
     elsif first_word_flag_r = '1' then
       done <= '1';
-      read_data <= '1';
+      read_data <= '0';
     end if;
     -------- END DATA READOUT -------
     when sync =>
@@ -2970,27 +3115,28 @@ begin
     -- Actual Slave Data Word is the last, Active LOW
     xeob_n <= '1';
     -- Slave Data (19 downto 0)
-    xd <= (others => '0');
+    xd <= X"00" & i_t;
     -- Slave has data for a given Trigger Number
     -- Can be either tristate or always enabled
     xsds <= '0';
     -------- START SYNC READOUT -------
     first_word_flag <= first_word_flag_r;
     if (ssel = '1') and ias_n = '0' then
+      cns <= run;
+      if i_tv = '0' then
+        cns <= reset;
+      end if;
       -- Slave Enable Tristate (Active Low)
       tris_en <= '1';
       first_word_flag <= first_word_flag_r or '1';
-      -- Set valid data in xd
-      -- Slave Data (19 downto 0)
-      xd <= X"00" & i_t;
           -- Actual Slave Data Word is the last, Active LOW
       xeob_n <= '0';
       -- Wait for 15ns after data valid
       cvalue <= std_logic_vector(to_unsigned(thold15, Ncnt));
-      if i_tv = '1' then
-        cns <= run;
-      end if;
-      if cvalid = '1' then
+--      if i_tv = '1' then
+--        cns <= run;
+--      end if;
+      if cvalid = '1' and ids = '0' then
       -- After 15 ns assert xdk and xeob
         -- Slave data is valid, Active LOW
         -- Slave recognized Master finished cycle, Active HIGH
@@ -3001,20 +3147,26 @@ begin
     end if;
     -------- END SYNC READOUT -------
   end case;
-end process;
--- New Data Request
-newdata_req: process(clk, rst) is
-begin
-  if rst = '1' then
-    i_rd_en <= '0';
-  elsif clk'event and clk='1' then
-    if read_data='1' and read_data_r='0' then
-      i_rd_en <= '1';
-    else
-      i_rd_en <= '0';
-    end if; 
+  if nstate /= pstate then
+    cns <= reset;
   end if;
 end process;
+-- New Data Request
+--newdata_req: process(clk, rst) is
+--begin
+--  if rst = '1' then
+--    i_rd_en <= '0';
+--  elsif clk'event and clk='1' then
+--    if read_data='1' and read_data_r='0' then
+--      i_rd_en <= '1';
+--    else
+--      i_rd_en <= '0';
+--    end if; 
+--  end if;
+--end process;
+i_rd_en <= '0' when rst = '1' else
+           '1' when read_data='1' and read_data_r='0' and read_on_last = '0' else
+           '0';
 
 -- Tristate Output Enable
 ts_enable_pr: process(ias_n, tris_en, ssel) is
@@ -3188,11 +3340,24 @@ architecture arch_imp of xaxi is
   signal slv_reg3   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);-- := ( rw_defaults.A_write_data );    -- 22 DOWNTO 0
   -- B FIFO Write DATA
   signal slv_reg4   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);-- := ( rw_defaults.B_write_data );    -- 22 DOWNTO 0
-  signal slv_reg5   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
-  signal slv_reg6   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
-  signal slv_reg7   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
-  signal slv_reg8   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
-  signal slv_reg9   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
+  -- TEST FIXED PATTERNS
+  signal slv_reg5   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := ( "000"                      &
+                                                                          rw_defaults.A_pattern_isfixed &  -- Enable B Fixed Pattern
+                                                                          '0' & rw_defaults.A_Nevent    &  -- Number of event of B
+                                                                          rw_defaults.A_event_data(0)   &  -- 1st pattern registers for B
+                                                                          rw_defaults.A_event_data(1)  );  -- 2nd pattern registers for B
+  signal slv_reg6   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := ( x"00"                         &
+                                                                          rw_defaults.A_event_data(2)   &  -- 3rd pattern registers for B
+                                                                          rw_defaults.A_event_data(3)  );  -- 4th pattern registers for B
+  signal slv_reg7   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := ( "000"                      &
+                                                                          rw_defaults.B_pattern_isfixed &  -- Enable B Fixed Pattern
+                                                                          '0' & rw_defaults.B_Nevent    &  -- Number of event of B
+                                                                          rw_defaults.B_event_data(1)   &  -- 1st pattern registers for B
+                                                                          rw_defaults.B_event_data(0)  );  -- 2nd pattern registers for B
+  signal slv_reg8   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := ( x"00"                         &
+                                                                          rw_defaults.B_event_data(3)   &  -- 3rd pattern registers for B
+                                                                          rw_defaults.B_event_data(2)  );  -- 4th pattern registers for B
+  signal slv_reg9  :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
   signal slv_reg10  :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
   signal slv_reg11  :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
   signal slv_reg12  :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
@@ -3448,11 +3613,23 @@ begin
         slv_reg3    <= (others => '0');
         -- B Write Data (reg 4): rw_reg.B_write_data
         slv_reg4    <= (others => '0');
-        --
-        slv_reg5    <= (others => '0');
-        slv_reg6    <= (others => '0');
-        slv_reg7    <= (others => '0'); 
-        slv_reg8    <= (others => '0');
+        -- TEST FIXED PATTERNS
+        slv_reg5    <= ( "000"                         &
+                         rw_defaults.A_pattern_isfixed &  -- Enable A Fixed Pattern
+                         '0' & rw_defaults.A_Nevent    &  -- Number of event of A
+                         rw_defaults.A_event_data(1)   &  -- 1st pattern registers for A
+                         rw_defaults.A_event_data(0)  );  -- 2nd pattern registers for A
+        slv_reg6    <= ( x"00"                         &
+                         rw_defaults.A_event_data(3)   &  -- 3rd pattern registers for A
+                         rw_defaults.A_event_data(2)  );  -- 4th pattern registers for A
+        slv_reg7    <= ( "000"                         &
+                         rw_defaults.B_pattern_isfixed &  -- Enable B Fixed Pattern
+                         '0' & rw_defaults.B_Nevent    &  -- Number of event of B
+                         rw_defaults.B_event_data(1)   &  -- 1st pattern registers for B
+                         rw_defaults.B_event_data(0)  );  -- 2nd pattern registers for B
+        slv_reg8    <= ( x"00"                         &
+                         rw_defaults.B_event_data(3)   &  -- 3rd pattern registers for B
+                         rw_defaults.B_event_data(2)  );  -- 4th pattern registers for B
         slv_reg9    <= (others => '0');
         slv_reg10   <= (others => '0');
         slv_reg11   <= (others => '0');
@@ -5203,5 +5380,18 @@ begin
   rw_reg.B_FIFO_read_en        <= slv_reg2(1);
   rw_reg.A_FIFO_write_en       <= slv_reg2(4);
   rw_reg.B_FIFO_write_en       <= slv_reg2(5);
+  -- Note: slv_reg3 and 4 used to write data in A and B FIFO
+  -- Enable A Fixed Pattern
+  rw_reg.A_pattern_isfixed     <= slv_reg5(28);
+  -- Number of event of A
+  rw_reg.A_Nevent              <= slv_reg5(26 downto 24);
+  -- 4 pattern registers for A
+  rw_reg.A_event_data          <= (slv_reg5(11 downto 0), slv_reg5(23 downto 12), slv_reg6(11 downto 0), slv_reg5(23 downto 12));
+  -- Enable B Fixed Pattern
+  rw_reg.B_pattern_isfixed     <= slv_reg7(28);
+  -- Number of event of B
+  rw_reg.B_Nevent              <= slv_reg7(26 downto 24);
+  -- 4 pattern registers for B
+  rw_reg.B_event_data          <= (slv_reg7(11 downto 0), slv_reg7(23 downto 12), slv_reg8(11 downto 0), slv_reg8(23 downto 12));
   
 end arch_imp;

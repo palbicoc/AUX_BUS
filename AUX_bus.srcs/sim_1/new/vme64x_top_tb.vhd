@@ -790,7 +790,11 @@ begin
     -- Enable AUX BUS
     W_CSR(c_USR_BIT_SET_REG, "00000000");
     report "THE MASTER HAS ENABLED THE AUX";
-	wait;
+--	wait for 1 us;
+--	 -- Enable AUX BUS
+--     W_CSR(c_USR_BIT_CLR_REG, "00000000");
+--     report "THE MASTER HAS DISENABLED THE AUX";
+    wait;
    end process;
 	
 --------------------
@@ -923,6 +927,7 @@ process
     wait for 40 ns;
     -- Address Bus is Valid
     BUS_xas_n         <= '0';
+    wait for 1 ns;
     RO_loop: loop
       -- ROCK ready to read from slave, Active LOW
       -- ROCK finished to read from slave, Active HIGH
@@ -1013,6 +1018,7 @@ process
     wait for 40 ns;
     -- Address Bus is Valid
     BUS_xas_n         <= '0';
+    wait for 1 ns;
     RO_loop: loop
       -- ROCK ready to read from slave, Active LOW
       -- ROCK finished to read from slave, Active HIGH
@@ -1023,16 +1029,18 @@ process
         exit RO_loop;
       end if;
       rx_data <= BUS_xd;
+      wait for 4 ns;
+      BUS_xds_n         <= '1';
+      wait for 1 ns;
       -- ROCK ready to read from slave, Active LOW
       -- ROCK finished to read from slave, Active HIGH
-      BUS_xds_n         <= '1';
-      wait for 15 ns;
       exit RO_loop when BUS_xeob_n = '0';
+      wait for 15 ns;
     end loop;
-    wait for 5 ns;
+    wait for 10 ns;
     -- Address Bus is Valid
     BUS_xas_n         <= '1';
-    wait for 50 ns;
+    wait for 40 ns;
     -- Address Bus
     BUS_xa_sel        <= '0';
   end trigger_readout;
@@ -1046,6 +1054,7 @@ begin
     wait until AUX_on_n = '0';
       wait for 100 ns;
   end if;
+  trig_num <= trig_num + 1;
   wait for tst;
   --report "Start AUX Trigger Cycle..." severity NOTE;
   trigger_cycle(trig_num);
@@ -1059,7 +1068,6 @@ begin
   --trig_num <= trig_num + 1;
   wait for 10 ns;
   wait for tst;
-  trig_num <= trig_num + 1;
   idle;
   wait for 1 us;
   wait for tst;
@@ -1093,11 +1101,11 @@ process
   variable curr_time : time;
   variable xd_temp   : std_logic_vector(19 DOWNTO 0);
 begin
-  wait until falling_edge(BUS_xds_n);
+  wait until rising_edge(BUS_xds_n);
   wait until BUS_xd'event;
   xd_temp := BUS_xd;
   curr_time := now;
-  loop ---------- Note: The most of the times (not always) there is a second event in xd.
+  loop ---------- Note: There could be a second event in xd.
     wait until falling_edge(BUS_xdk_n) or BUS_xd'event;
     if xd_temp = BUS_xd then
       exit;
@@ -1125,7 +1133,7 @@ begin
   wait for clk_period*50;
   wait until clk_p'event and clk_p='1';
   wait for clk_period/5;
-  if BUS_xsyncrd_n='1' then
+  if BUS_xsyncrd_n='1'and AUX_xbusy='0' then
     trigger <= '1';
   end if;
   wait for clk_period*10;
