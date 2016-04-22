@@ -26,6 +26,8 @@ package xpack is
 ---- TYPES ----
 -----------------------------------------------------------------
 type test_data_pattern is array (0 to 3) of std_logic_vector(11 downto 0);
+-------- CLK  PERIOD -------
+constant clock_period : integer := 5;
 -----------------------------------------------------------------
 ---- RECORDS ----
 -----------------------------------------------------------------
@@ -95,8 +97,8 @@ record
   -------- TEST -------
   -- Enable Test Mode: 0 Disable, 1 Enable.
   test_mode        : std_logic;
-  -- Trigger Test Mode : '0' : count real trigger, '1' : Count trigger only in Local FPGA --use value in rw_reg.test_Ntrig
-  test_trig_mode   : std_logic;
+  -- Trigger Mode : 1: Voted Trigger Mode : '0' : Localtrigger (Count trigger only in Local FPGA)
+  trig_mode        : std_logic;
   -- Test Trigger Number -- Unused
   test_Ntrig       : std_logic_vector (11 DOWNTO 0);
   -- A Busy flag in test mode
@@ -127,16 +129,21 @@ record
   -------- TEST PATTERN --------
   -- Enable A Fixed Pattern
   A_pattern_isfixed: std_logic;
-  -- Number of event of A (last 2 bit used)
+  -- Number of events for A (0 to 4)
   A_Nevent         : std_logic_vector (2 DOWNTO 0);
   -- 4 pattern registers for A
   A_event_data     : test_data_pattern;
   -- Enable B Fixed Pattern
   B_pattern_isfixed: std_logic;
-  -- Number of event of B (last 2 bit used)
+  -- Number of events for B (0 to 4)
   B_Nevent         : std_logic_vector (2 DOWNTO 0);
   -- 4 pattern registers for B
   B_event_data     : test_data_pattern;
+  -------- AUX TIMING --------
+  -- Delay to be added to the required 35 ns setup time.
+  thold35          : std_logic_vector (7 DOWNTO 0);
+  -- Delay to be added to the required 15 ns setup time.
+  thold15          : std_logic_vector (7 DOWNTO 0);
 end record;
 ------------------------------------------------------------------
 ---- CONSTANTS ----
@@ -164,12 +171,15 @@ constant rw_defaults : rw_reg_type := (
   (others => '0'),   -- B write data
   '0',               -- B Write Enable
   --------- TEST PATTERN --------
-  '0',
-  "001",
-  (x"AAA", x"555", x"0F0", x"F0F"),
-  '0',
-  "001",
-  (x"AAA", x"555", x"0F0", x"F0F")
+  '0',               -- Enable A Fixed Pattern
+  "001",             -- Number of events for A (0 to 4)
+  (x"AAA", x"555", x"0F0", x"F0F"), -- A pattern
+  '0',               -- Enable B Fixed Pattern
+  "001",             -- Number of events for B (0 to 4)
+  (x"AAA", x"555", x"0F0", x"F0F"), -- B pattern
+  -------- AUX TIMING --------
+  x"24",--(others => '0'),   -- thold 35
+  x"24"--(others => '0')    -- thold 15
 );
 ------------------------------------------------------------------
 ---- FUNCTIONS ----
@@ -260,7 +270,7 @@ use work.xpack.all;
 entity auxbus is
 Generic (
     -------- CLK  PERIOD -------
-    clock_period : integer := 10;
+    -- clock_period : integer := 10; moved in xpack
     -------- AXI-4  LITE -------
     C_S_AXI_DATA_WIDTH  : integer := 32;
     C_S_AXI_ADDR_WIDTH  : integer := 9
@@ -286,6 +296,7 @@ Port (
   A_Full        : out STD_LOGIC;
   A_Almost_full : out STD_LOGIC;
   A_Prog_full   : out STD_LOGIC;
+  A_Empty       : out STD_LOGIC;
   -------- B FIFO Interface -------
   B_Wr_clk      : in  STD_LOGIC;
   B_Din         : in  STD_LOGIC_VECTOR(22-1 DOWNTO 0);
@@ -293,6 +304,7 @@ Port (
   B_Full        : out STD_LOGIC;
   B_Almost_full : out STD_LOGIC;
   B_Prog_full   : out STD_LOGIC;
+  B_Empty       : out STD_LOGIC;
   -------- AXI-4  LITE -------
   S_AXI_ACLK    : in  std_logic;
   S_AXI_ARESETN : in  std_logic;
@@ -514,6 +526,8 @@ Port (
   clk2x : in STD_LOGIC;
   -- System reset
   rst : in STD_LOGIC;
+  --------  Ctrl Registers  -------
+  rw_reg        : in  rw_reg_type;
   -------- Control Interface -------
   -- Trigger Number
   i_t      : in  STD_LOGIC_VECTOR(11 downto 0);
@@ -711,6 +725,7 @@ signal a_rd_en     : STD_LOGIC;
 signal afull       : STD_LOGIC;
 signal aafull      : STD_LOGIC;
 signal apfull      : STD_LOGIC;
+signal aempty      : STD_LOGIC;
 -- B FIFO Side
 signal B_Din_i     : STD_LOGIC_VECTOR(21 downto 0);  
 signal B_Wr_en_i   : STD_LOGIC;  
@@ -720,6 +735,7 @@ signal b_rd_en     : STD_LOGIC;
 signal bfull       : STD_LOGIC;
 signal bafull      : STD_LOGIC;
 signal bpfull      : STD_LOGIC;
+signal bempty      : STD_LOGIC;
 -- FIFOs Common 
 signal full_i      : STD_LOGIC;
 --------------------
@@ -837,6 +853,8 @@ A_Full        <= afull;
 B_Full        <= bfull;
 A_Prog_full   <= apfull;
 B_Prog_full   <= bpfull;
+A_Empty       <= aempty;
+B_Empty       <= bempty;
 xfifo_inst: xfifo
 Port Map(
   Rst           => xfifo_reset,
@@ -850,7 +868,7 @@ Port Map(
   A_Prog_full   => apfull,
   A_Rd_en       => a_rd_en,
   A_Dout        => a_d,
-  A_Empty       => open,
+  A_Empty       => aempty,
   A_Valid       => a_dv,
   -------- B FIFO Interface -------
   B_Wr_clk      => B_Wr_clk,
@@ -861,7 +879,7 @@ Port Map(
   B_Prog_full   => bpfull,
   B_Rd_en       => b_rd_en,
   B_Dout        => b_d,
-  B_Empty       => open,
+  B_Empty       => bempty,
   B_Valid       => b_dv
 );
 -------- XFIFO Status Register -------
@@ -872,7 +890,7 @@ Port Map(
   -- A FIFO Prog Full
   ro_reg.AFIFO_ispfull <= apfull;
   -- A FIFO Empty
-  ro_reg.AFIFO_isempty <= not a_dv;
+  ro_reg.AFIFO_isempty <= aempty; --not a_dv;
   -- B FIFO Full
   ro_reg.BFIFO_isfull  <= bfull;
   -- B FIFO Almost Full
@@ -880,7 +898,7 @@ Port Map(
   -- B FIFO Prog Full
   ro_reg.BFIFO_ispfull <= bpfull;
   -- B FIFO Empty
-  ro_reg.BFIFO_isempty <= not b_dv;
+  ro_reg.BFIFO_isempty <= bempty; --not b_dv;
 -------- FIFO AXI/Test/Normal Mode -------
 -- Data Read to XAXI
 ro_reg.A_read_data <= a_d  when rw_reg.A_FIFO_read_en = '1' else
@@ -907,6 +925,7 @@ b_dv_xctrl    <= '0'       when rw_reg.A_FIFO_read_en = '1' or rw_reg.B_FIFO_rea
 -- Full to XFRONT
 full_i        <= --'0'       when rw_reg.A_FIFO_write_en = '1' or rw_reg.B_FIFO_write_en = '1' else
                  --busy_t    when test_mode = '1'                                              else
+                 '0'       when aempty='1' and bempty='1'    else
                  full;
 busy_t        <= A_busy_t  or B_busy_t;
 -- Data Read Enable to XFIFO
@@ -982,6 +1001,8 @@ Port Map(
   clk2x        => clk2x,
   -- System reset
   rst           => xfront_reset,
+  --------  Ctrl Registers  -------
+  rw_reg        => rw_reg,
   -------- Control Interface -------
   -- Trigger Number
   i_t           => trigger,
@@ -1413,8 +1434,10 @@ begin
     end if;
   end if;
 end process;
-trigger    <= trigger_i   when rw_reg.test_mode='1' and rw_reg.test_trig_mode='0' else trig_counter; --else rw_reg.test_Ntrig;
-trigger_v  <= trigger_v_i when rw_reg.test_mode='1' and rw_reg.test_trig_mode='0' else '1';
+--trigger    <= trigger_i   when rw_reg.test_mode='1' and rw_reg.trig_mode='0' else trig_counter; --else rw_reg.test_Ntrig;
+--trigger_v  <= trigger_v_i when rw_reg.test_mode='1' and rw_reg.trig_mode='0' else '1';
+trigger    <= trigger_i   when rw_reg.trig_mode='0' else trig_counter; --else rw_reg.test_Ntrig;
+trigger_v  <= trigger_v_i when rw_reg.trig_mode='0' else '1';
 --------------------
 -- Status Register
 --------------------
@@ -1522,9 +1545,12 @@ end component;
 --------------------
 -- PRBS-15 Settings
 constant A_INV_PATTERN : boolean := true;
-constant B_INV_PATTERN : boolean := false;
+constant B_INV_PATTERN : boolean := true;
 constant POLY_LENGHT   : natural range 0 to 63  := 15;
 constant POLY_TAP      : natural range 0 to 63  := 14;
+constant B_INV_PATTERN_Nev   : boolean := false;
+constant B_POLY_LENGHT_Nev   : natural range 0 to 63  := 20;
+constant B_POLY_TAP_Nev      : natural range 0 to 63  := 3;
 ------------------------------------------------------------------
 ---- SIGNALS    DECLARATION ----
 ------------------------------------------------------------------
@@ -1542,6 +1568,7 @@ SIGNAL a_data_prbs      : STD_LOGIC_VECTOR(11 downto 0);
 -- PRBS_ANY: A EVENT GENERATION
 --------------------
 SIGNAL an               : STD_LOGIC_VECTOR(5 DOWNTO 0);
+SIGNAL A_Nevent         : STD_LOGIC_VECTOR(2 DOWNTO 0);
 SIGNAL an_10bit         : STD_LOGIC_VECTOR(9 DOWNTO 0);
 SIGNAL aev_req          : STD_LOGIC;
 --------------------
@@ -1571,6 +1598,7 @@ SIGNAL b_data           : STD_LOGIC_VECTOR(11 downto 0);
 -- PRBS_ANY: B EVENT GENERATION
 --------------------
 SIGNAL bn               : STD_LOGIC_VECTOR(5 DOWNTO 0);
+SIGNAL B_Nevent         : STD_LOGIC_VECTOR(2 DOWNTO 0);
 SIGNAL bn_10bit         : STD_LOGIC_VECTOR(9 DOWNTO 0);
 SIGNAL bev_req          : STD_LOGIC;
 --------------------
@@ -1667,16 +1695,23 @@ aevent_gen: PRBS_ANY
   EN            => aev_req,
   DATA_OUT      => an_10bit
 );
-an <=  "000" & std_logic_vector(1 + unsigned('0' & rw_reg.A_Nevent(1 downto 0))) when rw_reg.A_pattern_isfixed='1' else 
+A_Nevent <= "000" when rw_reg.A_Nevent(2 downto 0) = "000" else
+            "001" when rw_reg.A_Nevent(2 downto 0) = "001" else
+            "010" when rw_reg.A_Nevent(2 downto 0) = "010" else
+            "011" when rw_reg.A_Nevent(2 downto 0) = "011" else
+            "100";
+an  <=  "000" & A_Nevent when rw_reg.A_pattern_isfixed='1' else 
        std_logic_vector( unsigned('0' & an_10bit(9 downto 5)) + unsigned(an_10bit(4 downto 1)) + unsigned(an_10bit(0 downto 0)) );
+--an <=  "000" & std_logic_vector(1 + unsigned('0' & rw_reg.A_Nevent(1 downto 0))) when rw_reg.A_pattern_isfixed='1' else 
+--       std_logic_vector( unsigned('0' & an_10bit(9 downto 5)) + unsigned(an_10bit(4 downto 1)) + unsigned(an_10bit(0 downto 0)) );
 --------------------
 -- PRBS_ANY: B EVENT GENERATION
 --------------------
 bevent_gen: PRBS_ANY 
  GENERIC MAP(
-    INV_PATTERN => B_INV_PATTERN,
-    POLY_LENGHT => POLY_LENGHT,              
-    POLY_TAP    => POLY_TAP,
+    INV_PATTERN => B_INV_PATTERN_Nev,
+    POLY_LENGHT => B_POLY_LENGHT_Nev,              
+    POLY_TAP    => B_POLY_TAP_Nev,
     NBITS       => 10
  )
  PORT MAP(
@@ -1687,8 +1722,15 @@ bevent_gen: PRBS_ANY
   EN            => bev_req,
   DATA_OUT      => bn_10bit
 );
-bn <= "000" & std_logic_vector(1 + unsigned('0' & rw_reg.B_Nevent(1 downto 0))) when rw_reg.B_pattern_isfixed = '1' else
+B_Nevent <= "000" when rw_reg.B_Nevent(2 downto 0) = "000" else
+            "001" when rw_reg.B_Nevent(2 downto 0) = "001" else
+            "010" when rw_reg.B_Nevent(2 downto 0) = "010" else
+            "011" when rw_reg.B_Nevent(2 downto 0) = "011" else
+            "100";
+bn <= "000" & B_Nevent when rw_reg.B_pattern_isfixed = '1' else
       std_logic_vector( unsigned('0' & bn_10bit(9 downto 5)) + unsigned(bn_10bit(4 downto 1)) + unsigned(bn_10bit(0 downto 0)) );
+--bn <= "000" & std_logic_vector(1 + unsigned('0' & rw_reg.B_Nevent(1 downto 0))) when rw_reg.B_pattern_isfixed = '1' else
+--      std_logic_vector( unsigned('0' & bn_10bit(9 downto 5)) + unsigned(bn_10bit(4 downto 1)) + unsigned(bn_10bit(0 downto 0)) );
 --------------------
 -- A FIFO STIMULI
 --------------------
@@ -2462,6 +2504,8 @@ Port (
   clk2x : in STD_LOGIC;
   -- System reset
   rst : in STD_LOGIC;
+  --------  Ctrl Registers  -------
+  rw_reg        : in  rw_reg_type;
   -------- Control Interface -------
   -- Trigger Number
   i_t      : in  STD_LOGIC_VECTOR(11 downto 0);
@@ -2537,16 +2581,15 @@ architecture rtl of xfront is
 ------------------------------------------------------------------
 ---- CONSTANTS ----
 ------------------------------------------------------------------
--- input to output
---constant thold35             : integer := (35-clock_period/2)/clock_period;
---constant thold15             : integer := (15-clock_period/2)/clock_period;
--- internal to output
-constant thold35             : integer := (1000*(35+clock_period)-1)/1000/clock_period-1;
-constant thold15             : integer := (1000*(15+clock_period)-1)/1000/clock_period+1;
+--constant thold35             : integer := (1000*(35+clock_period)-1)/1000/clock_period-1;
+--constant thold15             : integer := (1000*(15+clock_period)-1)/1000/clock_period+1;
+constant thold35_min         : integer := (1000*(35+clock_period)-1)/1000/clock_period-1;
+constant thold15_min         : integer := (1000*(15+clock_period)-1)/1000/clock_period+1;
 --------------------
 -- Counter
 --------------------
-constant Ncnt				        : integer := 1+log2(thold15);
+--constant Ncnt				        : integer := 1+log2(thold15);
+constant Ncnt				        : integer := 12;
 ------------------------------------------------------------------
 ---- SIGNALS ----
 ------------------------------------------------------------------
@@ -2580,6 +2623,8 @@ signal od                   : std_logic_vector(19 downto 0);
 signal cvalue 				      : std_logic_vector(Ncnt-1 downto 0);
 signal ccnt    				      : std_logic_vector(Ncnt-1 downto 0);
 signal cvalid               : std_logic;
+signal thold35              : integer; --std_logic_vector(7 downto 0);
+signal thold15              : integer; --std_logic_vector(7 downto 0);
 -- Counter State Machine
 type cstate is (idle, reset, start, run, freerun);
   -- PS
@@ -2645,7 +2690,11 @@ attribute async_reg of m_ssel : signal is "TRUE";
 signal tris_en     : std_logic;
 
 begin
-  
+
+-- Timing
+thold35 <= thold35_min+to_integer(unsigned(rw_reg.thold35));
+thold15 <= thold35_min+to_integer(unsigned(rw_reg.thold15));
+
 -- Input Synchronisation
 insync_pr: process (rst, clk, clk2x) is
 begin
@@ -2752,7 +2801,7 @@ end process;
 -- Slave is busy
 full    <= i_full;-- or full_r;
 -- Slave has an error, Active LOW
-xberr_n <= not i_mmatch;
+--xberr_n <= not i_mmatch;
 
 -------- COUNTER -------
 -- Counter Seq. Network
@@ -3078,12 +3127,13 @@ begin
       tris_en <= '1';
       if (ids = '0') then
         first_word_flag <= first_word_flag_r or '1';
-        read_data <= '1';
         if cvalid = '1' then
           -- After at least 15 ns xdk and xeob are assert
           -- Slave data is valid, Active LOW
           -- Slave recognized Master finished cycle, Active HIGH
           odk <= '0'; -- Latched
+          -- A new data can be requested
+          read_data <= '1';
         end if;
         if odk = '0' then
           cns <= reset;
@@ -3091,7 +3141,7 @@ begin
       end if;
     elsif first_word_flag_r = '1' then
       done <= '1';
-      read_data <= '0';
+      read_data <= '1';
     end if;
     -------- END DATA READOUT -------
     when sync =>
@@ -3318,7 +3368,9 @@ architecture arch_imp of xaxi is
   --------------------------------------------------
   ---- Number of Slave Registers 128
   -- Reset Register
-  signal slv_reg0   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := ( x"0000000" & '0' &             -- 31 DOWNTO 3
+  signal slv_reg0   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := ( rw_defaults.thold35 &          -- Delay to be added to the required 35 ns setup time.
+                                                                          rw_defaults.thold15 &          -- Delay to be added to the required 15 ns setup time.
+                                                                          x"000" & '0' &                 -- 31 DOWNTO 3
                                                                           rw_defaults.triggerreset &     -- 2: Trigger Counters Reset (A+B+Local)
                                                                           rw_defaults.fiforeset &        -- 1: Reset FIFOs
                                                                           rw_defaults.reset );           -- 0: Reset Aux Bus
@@ -3327,7 +3379,7 @@ architecture arch_imp of xaxi is
                                                                           rw_defaults.test_Ntrig &       -- 15 DOWNTO 4: Unused
                                                                           rw_defaults.B_is_busy &        -- 3: B Busy flag in test mode
                                                                           rw_defaults.A_is_busy &        -- 2: A Busy flag in test mode
-                                                                          rw_defaults.test_trig_mode &   -- 1: Trigger Test Mode : '0' : count real trigger, '1' : Count trigger only in Local FPGA
+                                                                          rw_defaults.trig_mode &        -- 1: Voted Trigger Mode : '0' : Localtrigger (Count trigger only in Local FPGA)
                                                                           rw_defaults.test_mode );       -- 0: Enable Test Mode: 0 Disable, 1 Enable.
   -- FIFO Control Register
   signal slv_reg2   :std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0) := ( x"0000_00" & b"00" &           -- 31 DOWNTO 6
@@ -3592,7 +3644,9 @@ begin
       if S_AXI_ARESETN = '0' then
         -- Reset Register
   -- Reset Register
-        slv_reg0    <= ( x"0000000" & '0' &             -- 31 DOWNTO 3 
+        slv_reg0    <= ( rw_defaults.thold35 &          -- Delay to be added to the required 35 ns setup time.
+                         rw_defaults.thold15 &          -- Delay to be added to the required 15 ns setup time.
+                         x"000" & '0' &                 -- 15 DOWNTO 3 
                          rw_defaults.triggerreset &     -- 2           
                          rw_defaults.fiforeset &        -- 1           
                          rw_defaults.reset );           -- 0            
@@ -3601,7 +3655,7 @@ begin
                          rw_defaults.test_Ntrig &       -- 15 DOWNTO 4 
                          rw_defaults.B_is_busy &        -- 3           
                          rw_defaults.A_is_busy &        -- 2           
-                         rw_defaults.test_trig_mode &   -- 1           
+                         rw_defaults.trig_mode &        -- 1           
                          rw_defaults.test_mode );       -- 0           
         slv_reg2    <= ( x"0000_00" & b"00" &           -- 31 DOWNTO 2
                          rw_defaults.B_FIFO_write_en &  -- 5: Enable Read from B FIFO
@@ -5364,11 +5418,16 @@ begin
   rw_reg.fiforeset             <= slv_reg0(1);
   -- Trigger Counters Reset (A+B+Local)
   rw_reg.triggerreset          <= slv_reg0(2);
+  -------- AUX TIMINGS -------
+  -- Delay to be added to the required 35 ns setup time.
+  rw_reg.thold35               <= slv_reg0(31 downto 24);
+  -- Delay to be added to the required 15 ns setup time.
+  rw_reg.thold15               <= slv_reg0(23 downto 16);
   -------- TEST -------
   -- Enable Test Mode: 0 Disable, 1 Enable.
   rw_reg.test_mode             <= slv_reg1(0);
-  -- Trigger Test Mode : '0' : count real trigger, '1' : use value in rw_reg.test_Ntrig
-  rw_reg.test_trig_mode        <= slv_reg1(1);
+  -- Trigger Mode : 1: Voted Trigger Mode : '0' : Localtrigger (Count trigger only in Local FPGA)
+  rw_reg.trig_mode             <= slv_reg1(1);
   -- Test Trigger Number
   rw_reg.test_Ntrig            <= slv_reg1(15 DOWNTO 4);
   -- A Busy flag in test mode
@@ -5386,12 +5445,11 @@ begin
   -- Number of event of A
   rw_reg.A_Nevent              <= slv_reg5(26 downto 24);
   -- 4 pattern registers for A
-  rw_reg.A_event_data          <= (slv_reg5(11 downto 0), slv_reg5(23 downto 12), slv_reg6(11 downto 0), slv_reg5(23 downto 12));
+  rw_reg.A_event_data          <= (slv_reg5(11 downto 0), slv_reg5(23 downto 12), slv_reg6(11 downto 0), slv_reg6(23 downto 12));
   -- Enable B Fixed Pattern
   rw_reg.B_pattern_isfixed     <= slv_reg7(28);
   -- Number of event of B
   rw_reg.B_Nevent              <= slv_reg7(26 downto 24);
   -- 4 pattern registers for B
   rw_reg.B_event_data          <= (slv_reg7(11 downto 0), slv_reg7(23 downto 12), slv_reg8(11 downto 0), slv_reg8(23 downto 12));
-  
 end arch_imp;
