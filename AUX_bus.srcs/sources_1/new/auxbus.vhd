@@ -3004,7 +3004,9 @@ begin
       -- Wait for the end of the trigger cycle (i.e. xtrgv = '1')
       xbk <= '1';
       done <= '1';
-      read_data <= i_nodata and isyncrd_n;
+      if nstate /= trig then
+        read_data <= i_nodata and isyncrd_n;
+      end if;
     end if;
     -------- ROCK OPEN COLLECOTR INPUT -------
     -- Slave has an error, Active LOW
